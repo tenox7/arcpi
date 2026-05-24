@@ -23,6 +23,14 @@ LARGE_INTEGER RtlConvertUlongToLargeInteger(IN ULONG UnsignedInteger);
 VOID RtlInitString(OUT PSTRING DestinationString, IN PCHAR SourceString);
 
 //
+// ntos image helper BlLoadImage (BOOT/LIB/PELDR.C) calls; implemented real in
+// loader/arm/imageldr.c. (LdrRelocateImage is already declared in ntldr.h; the
+// imageldr.c guard definition matches that signature.)
+//
+PVOID RtlImageDirectoryEntryToData(IN PVOID Base, IN BOOLEAN MappedAsImage,
+                                   IN USHORT DirectoryEntry, OUT PULONG Size);
+
+//
 // ke.h - searches the ARC configuration tree.
 //
 PCONFIGURATION_COMPONENT_DATA KeFindConfigurationEntry(

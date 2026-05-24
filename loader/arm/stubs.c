@@ -68,13 +68,14 @@ PCONFIGURATION_COMPONENT_DATA KeFindConfigurationEntry(PCONFIGURATION_COMPONENT_
 //
 
 // ---- image loading / binding ----
-
-ARC_STATUS BlLoadImage(ULONG DeviceId, TYPE_OF_MEMORY MemoryType, PCHAR LoadFile,
-                       USHORT ImageType, PVOID *ImageBase)
-{
-    STUB("BlLoadImage");
-    return ENODEV;
-}
+//
+// BlLoadImage is no longer stubbed - ported real in loader/ported/peldr.c (the NT
+// PE loader). RtlImageNtHeader (also formerly stubbed here) and
+// RtlImageDirectoryEntryToData + the LdrRelocateImage guard are in
+// loader/arm/imageldr.c. BlAllocateDataTableEntry / BlScanImportDescriptorTable
+// stay stubbed: the trimmed kernel handoff (init.c BlArmBootKernel) skips loader
+// data-table entries and import resolution, which a real multi-image boot needs.
+//
 
 ARC_STATUS BlAllocateDataTableEntry(PCHAR BaseDllName, PCHAR FullDllName,
                                     PVOID ImageHeader, PLDR_DATA_TABLE_ENTRY *Entry)
@@ -91,11 +92,7 @@ ARC_STATUS BlScanImportDescriptorTable(ULONG DeviceId, PCHAR DeviceName,
     return ENODEV;
 }
 
-PIMAGE_NT_HEADERS RtlImageNtHeader(PVOID Base)
-{
-    STUB("RtlImageNtHeader");
-    return NULL;
-}
+// RtlImageNtHeader is no longer stubbed - real in loader/arm/imageldr.c.
 
 // ---- registry / NLS / drivers ----
 
@@ -164,8 +161,6 @@ BOOLEAN BlLastKnownGoodPrompt(PBOOLEAN UseLastKnownGood)
     return TRUE;
 }
 
-ARC_STATUS BlSetupForNt(PLOADER_PARAMETER_BLOCK LoaderBlock)
-{
-    STUB("BlSetupForNt");
-    return ENODEV;
-}
+// BlSetupForNt is no longer stubbed - real (minimal) in loader/arm/ntsetup.c (the
+// ARM analog of BOOT/LIB/MIPS/NTSETUP.C): it allocates the kernel stack the kernel
+// entry switches to.

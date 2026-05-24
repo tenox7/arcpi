@@ -1604,6 +1604,18 @@ typedef struct _ALPHA_LOADER_BLOCK {
 
 } ALPHA_LOADER_BLOCK, *PALPHA_LOADER_BLOCK;
 
+//
+// ARM port (not in the original NT 3.5 arc.h). The MIPS/Alpha blocks carry the
+// arch state their kernels need at entry (GpBase, PCR/PDR pages, page-table
+// pointers). The stand-in ARM kernel runs MMU-off and needs none of that yet, so
+// this is a placeholder; real fields (e.g. a TTBR/PCR page) arrive with a real
+// ARM kernel. Kept smaller than MIPS/Alpha so it does not change the union size,
+// hence the offset of KernelStack and the other arch-independent fields.
+//
+typedef struct _ARM_LOADER_BLOCK {
+    ULONG Reserved;
+} ARM_LOADER_BLOCK, *PARM_LOADER_BLOCK;
+
 struct _SETUP_LOADER_BLOCK;
 
 typedef struct _LOADER_PARAMETER_BLOCK {
@@ -1633,6 +1645,7 @@ typedef struct _LOADER_PARAMETER_BLOCK {
         MIPS_LOADER_BLOCK Mips;
         ALPHA_LOADER_BLOCK Alpha;
         PPC_LOADER_BLOCK Ppc;
+        ARM_LOADER_BLOCK Arm;
     } u;
 
 } LOADER_PARAMETER_BLOCK, *PLOADER_PARAMETER_BLOCK;

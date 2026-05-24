@@ -123,15 +123,22 @@ ARC_STATUS BlLoadBootDrivers(ULONG DeviceId, PCHAR LoadDevice, PCHAR SystemPath,
 // ---- device names / disk info / break-in / setup ----
 
 // Stand-in: the real BlGenerateDeviceNames builds the ARC<->NT device-name mapping that
-// osloader.c stores in ArcBootDeviceName/ArcHalDeviceName/NtBootPathName. The stand-in
-// kernel reads none of those, so return empty names + ESUCCESS (an error would fail the
-// load just before BlSetupForNt). osloader.c calls strlen/strcpy on the two out buffers.
+// osloader.c stores in ArcBootDeviceName/ArcHalDeviceName/NtBootPathName. We have no NT
+// device tree, so echo the ARC device name into the canonical output (gives the kernel's
+// boot screen a real device name) and leave the NT prefix empty; return ESUCCESS (an
+// error would fail the load just before BlSetupForNt). osloader.c strlen/strcpy's both.
 ARC_STATUS BlGenerateDeviceNames(PCHAR ArcDeviceName, PCHAR ArcCanonicalName,
                                  PCHAR NtDevicePrefix)
 {
-    (void)ArcDeviceName;
-    if (ArcCanonicalName) ArcCanonicalName[0] = '\0';
-    if (NtDevicePrefix) NtDevicePrefix[0] = '\0';
+    if (ArcCanonicalName) {
+        ULONG i = 0;
+        if (ArcDeviceName)
+            for (; ArcDeviceName[i]; i += 1)
+                ArcCanonicalName[i] = ArcDeviceName[i];
+        ArcCanonicalName[i] = '\0';
+    }
+    if (NtDevicePrefix)
+        NtDevicePrefix[0] = '\0';
     return ESUCCESS;
 }
 

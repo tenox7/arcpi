@@ -40,6 +40,18 @@ typedef struct _LIST_ENTRY {
     struct _LIST_ENTRY *Blink;
 } LIST_ENTRY, *PLIST_ENTRY;
 
+typedef unsigned short WCHAR;
+typedef WCHAR *PWSTR;
+
+// UNICODE_STRING (ntdef.h). Length is in BYTES; characters = Length/2. The loader
+// stores ASCII names zero-extended to 16-bit WCHARs (BlAllocateDataTableEntry), so the
+// kernel recovers the name by taking the low byte of each WCHAR.
+typedef struct _UNICODE_STRING {
+    USHORT Length;
+    USHORT MaximumLength;
+    PWSTR  Buffer;
+} UNICODE_STRING, *PUNICODE_STRING;
+
 //
 // Mirror of arc.h LOADER_PARAMETER_BLOCK. KernelStack is at offset 24 (three 8-byte
 // LIST_ENTRYs precede it) - the same offset start.S loads sp from. The architecture
@@ -116,6 +128,42 @@ typedef struct _OEM_FONT_FILE_HEADER {
         USHORT Offset;
     } Map[1];
 } __attribute__((packed)) OEM_FONT_FILE_HEADER, *POEM_FONT_FILE_HEADER;
+
+//
+// Mirror of ntldr.h LDR_DATA_TABLE_ENTRY - one per image the OS Loader loaded
+// (BlAllocateDataTableEntry), linked into LoaderBlock->LoadOrderListHead by its FIRST
+// field (InLoadOrderLinks at offset 0, so a list link IS the entry pointer). We read
+// DllBase/EntryPoint/SizeOfImage/BaseDllName to report the loaded modules.
+//
+typedef struct _LDR_DATA_TABLE_ENTRY {
+    LIST_ENTRY     InLoadOrderLinks;
+    LIST_ENTRY     InMemoryOrderLinks;
+    LIST_ENTRY     InInitializationOrderLinks;
+    PVOID          DllBase;
+    PVOID          EntryPoint;
+    ULONG          SizeOfImage;
+    UNICODE_STRING FullDllName;
+    UNICODE_STRING BaseDllName;
+    ULONG          Flags;
+    USHORT         LoadCount;
+    USHORT         TlsIndex;
+    PVOID          SectionPointer;
+    ULONG          CheckSum;
+} LDR_DATA_TABLE_ENTRY, *PLDR_DATA_TABLE_ENTRY;
+
+//
+// Mirror of arc.h MEMORY_ALLOCATION_DESCRIPTOR - one per physical-memory region the
+// loader recorded, linked into LoaderBlock->MemoryDescriptorListHead by ListEntry
+// (offset 0). MemoryType holds a TYPE_OF_MEMORY value (0..23; LoaderFree == 2).
+//
+typedef struct _MEMORY_ALLOCATION_DESCRIPTOR {
+    LIST_ENTRY ListEntry;
+    ULONG      MemoryType;
+    ULONG      BasePage;
+    ULONG      PageCount;
+} MEMORY_ALLOCATION_DESCRIPTOR, *PMEMORY_ALLOCATION_DESCRIPTOR;
+
+#define LoaderFree 2    // TYPE_OF_MEMORY: free RAM available to the kernel
 
 // jxdisp.c - ported NT HAL display (NTHALS/.../JXDISP.C).
 BOOLEAN HalpInitializeDisplay0(PLOADER_PARAMETER_BLOCK LoaderBlock);

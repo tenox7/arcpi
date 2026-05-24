@@ -52,8 +52,17 @@ ${CROSS}objcopy -O binary "$OUT/kernel.elf" "$OUT/kernel.bin"
 entry=$(${CROSS}readelf -h "$OUT/kernel.elf" | awk "/Entry point/ {print \$NF}")
 echo "   kernel.elf entry = $entry, .bss = $bss bytes, kernel.bin = $(stat -c%s "$OUT/kernel.bin") bytes"
 
-mkdir -p /work/arcfw/ramdisk/root/OS
-python3 mkpe.py "$OUT/kernel.bin" /work/arcfw/ramdisk/root/OS/NTOSKRNL.EXE \
+mkdir -p /work/arcfw/ramdisk/root/WINNT/System32
+python3 mkpe.py "$OUT/kernel.bin" /work/arcfw/ramdisk/root/WINNT/System32/NTOSKRNL.EXE \
         --image-base 0x01000000 --section-rva 0x1000 --entry "$entry" --machine 0x1c0
+
+# Minimal stand-in HAL.DLL. The genuine BlOsLoader (boot menu [3]) loads hal.dll from
+# the osloader directory (\WINNT\System32) right after the kernel. Our stand-in kernel
+# imports nothing from the HAL and never calls it, so this only needs to be a valid ARM
+# PE (machine 0x1c0) that BlLoadImage can map at a base that does not collide with the
+# kernel (0x01000000) - loaded at 0x01100000. Content is a single "bx lr" (never run).
+printf "\x1e\xff\x2f\xe1" > "$OUT/hal.bin"   # ARM bx lr (e12fff1e)
+python3 mkpe.py "$OUT/hal.bin" /work/arcfw/ramdisk/root/WINNT/System32/HAL.DLL \
+        --image-base 0x01100000 --section-rva 0x1000 --entry 0x01101000 --machine 0x1c0
 '
-echo ">> NTOSKRNL.EXE written to arcfw/ramdisk/root/OS/. Next: make-ramdisk.sh, then build.sh."
+echo ">> NTOSKRNL.EXE + HAL.DLL written to arcfw/ramdisk/root/WINNT/System32/. Next: make-ramdisk.sh, then build.sh."

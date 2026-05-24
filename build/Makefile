@@ -60,7 +60,7 @@ ARM_OBJS    := $(OBJDIR)/start.o $(OBJDIR)/uart.o $(OBJDIR)/main.o \
                $(OBJDIR)/imageldr.o $(OBJDIR)/ntsetup.o
 PORTED_OBJS := $(OBJDIR)/osloader.o $(OBJDIR)/blmisc.o $(OBJDIR)/blmemory.o \
                $(OBJDIR)/blio.o $(OBJDIR)/fatboot.o $(OBJDIR)/arcdos.o \
-               $(OBJDIR)/peldr.o
+               $(OBJDIR)/peldr.o $(OBJDIR)/blbind.o
 OBJS        := $(ARM_OBJS) $(PORTED_OBJS) $(OBJDIR)/payload_blob.o $(OBJDIR)/font_blob.o
 # Embed the FAT image blob only for the QEMU build; the initramfs build serves the
 # firmware-staged image from RAM, so the ~6 MiB blob is omitted and arcfw.bin is tiny.

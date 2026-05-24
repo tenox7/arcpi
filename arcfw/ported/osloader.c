@@ -24,6 +24,17 @@ Revision History:
 #include "stdio.h"
 #include "string.h"
 #include "msg.h"
+
+//
+// ARM port: this build loads the stand-in kernel (arcfw/kernel/), which is NOT a real
+// ntoskrnl - it consumes only the loader block, its memory map, the kernel stack, and
+// the OEM font + framebuffer. It reads NEITHER the registry SYSTEM hive NOR NLS data.
+// So with STAND_IN_KERNEL set we skip BlLoadAndScanSystemHive (a valid minimal SYSTEM
+// hive + NLS files are substantial and would only be ignored). Set to 0 for a future
+// real-kernel build to do the genuine hive/NLS load. The contract proven here is the
+// real BlOsLoader load + handoff path, not faithful registry/NLS init.
+//
+#define STAND_IN_KERNEL 1
 
 
 
@@ -691,12 +702,20 @@ Return Value:
     // "Cannot load system hardware configuration file.\r\n"
 
 
+#if STAND_IN_KERNEL
+    //
+    // Skip the SYSTEM hive + NLS load (see STAND_IN_KERNEL note at the top). The stand-in
+    // kernel reads neither; NlsData stays allocated-but-empty and RegistryBase NULL.
+    //
+    Status = ESUCCESS;
+#else
     Status = BlLoadAndScanSystemHive(LoadDeviceId,
                                      LoadDevice,
                                      LoadFileName,
                                      BootFileSystem,
                                      UseLastKnownGood,
                                      BadFileName);
+#endif
 
     // warning message ?
 
@@ -801,6 +820,7 @@ Return Value:
     //
 
 LoadFailed:
+    BlPrint("[osloader] LoadFailed: Status=0x%lx\n", (unsigned long)Status);   // ARM bring-up diagnostic
     return Status;
 
 }

@@ -72,25 +72,11 @@ PCONFIGURATION_COMPONENT_DATA KeFindConfigurationEntry(PCONFIGURATION_COMPONENT_
 // BlLoadImage is no longer stubbed - ported real in arcfw/ported/peldr.c (the NT
 // PE loader). RtlImageNtHeader (also formerly stubbed here) and
 // RtlImageDirectoryEntryToData + the LdrRelocateImage guard are in
-// arcfw/arm/imageldr.c. BlAllocateDataTableEntry / BlScanImportDescriptorTable
-// stay stubbed: the trimmed kernel handoff (init.c BlArmBootKernel) skips loader
-// data-table entries and import resolution, which a real multi-image boot needs.
+// arcfw/arm/imageldr.c. BlAllocateDataTableEntry / BlScanImportDescriptorTable are
+// no longer stubbed either - ported real in arcfw/ported/blbind.c (verbatim NT
+// BLBIND.C), so the genuine BlOsLoader path ([3]) builds the loaded-module list and
+// resolves imports. (The trimmed kernel handoff [1] still doesn't need them.)
 //
-
-ARC_STATUS BlAllocateDataTableEntry(PCHAR BaseDllName, PCHAR FullDllName,
-                                    PVOID ImageHeader, PLDR_DATA_TABLE_ENTRY *Entry)
-{
-    STUB("BlAllocateDataTableEntry");
-    return ENODEV;
-}
-
-ARC_STATUS BlScanImportDescriptorTable(ULONG DeviceId, PCHAR DeviceName,
-                                       PCHAR DirectoryPath,
-                                       PLDR_DATA_TABLE_ENTRY DataTableEntry)
-{
-    STUB("BlScanImportDescriptorTable");
-    return ENODEV;
-}
 
 // RtlImageNtHeader is no longer stubbed - real in arcfw/arm/imageldr.c.
 
@@ -136,11 +122,17 @@ ARC_STATUS BlLoadBootDrivers(ULONG DeviceId, PCHAR LoadDevice, PCHAR SystemPath,
 
 // ---- device names / disk info / break-in / setup ----
 
+// Stand-in: the real BlGenerateDeviceNames builds the ARC<->NT device-name mapping that
+// osloader.c stores in ArcBootDeviceName/ArcHalDeviceName/NtBootPathName. The stand-in
+// kernel reads none of those, so return empty names + ESUCCESS (an error would fail the
+// load just before BlSetupForNt). osloader.c calls strlen/strcpy on the two out buffers.
 ARC_STATUS BlGenerateDeviceNames(PCHAR ArcDeviceName, PCHAR ArcCanonicalName,
                                  PCHAR NtDevicePrefix)
 {
-    STUB("BlGenerateDeviceNames");
-    return ENODEV;
+    (void)ArcDeviceName;
+    if (ArcCanonicalName) ArcCanonicalName[0] = '\0';
+    if (NtDevicePrefix) NtDevicePrefix[0] = '\0';
+    return ESUCCESS;
 }
 
 ARC_STATUS BlGetArcDiskInformation(VOID)

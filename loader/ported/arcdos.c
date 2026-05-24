@@ -2624,7 +2624,11 @@ Return Value:
 
    // FwRtlStackPanic = 0;
     CommandNumber = 0;
-    DefaultARCPath[0] = 0;
+    // ARM port: default to the loader's one FAT partition so file commands (dir/type)
+    // resolve immediately. The original starts empty (DefaultARCPath[0] = 0), which on
+    // a real ARC machine requires an explicit `cd device(...)` first; cd still works to
+    // change it.
+    strcpy(DefaultARCPath, "multi(0)disk(0)rdisk(0)partition(1)");
     UseExistingCommand = TRUE;
 
     //

@@ -30,12 +30,11 @@ extern unsigned int *fb_base;
 extern unsigned int fb_width, fb_height, fb_pitch;
 
 //
-// 8x8 glyphs scaled 2x to 16x16 cells - legible on a real monitor (e.g. 80x45
-// characters at 1280x720, 120x67 at 1920x1080).
+// 8x8 glyphs drawn 1:1 (no scaling) - 240x135 characters at 1920x1080.
 //
 #define GLYPH_W 8
 #define GLYPH_H 8
-#define SCALE   2
+#define SCALE   1
 #define CELL_W  (GLYPH_W * SCALE)
 #define CELL_H  (GLYPH_H * SCALE)
 

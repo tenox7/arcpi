@@ -7,76 +7,80 @@
 // arc.h), and the Arc* call macros dispatch through GlobalFirmwareVectors[].
 //
 // Every slot starts pointing at BlArcNotYetImplemented; the console/memory/halt
-// subset is replaced with real AE* routines backed by RPi2 hardware.
+// subset is replaced with real AE* routines backed by RPi2 hardware, and the
+// file/disk subset (M2) is a BlFileTable-backed device+file layer.
 //
-#include "bldr.h"
+// Two firmware-vector consumers meet here, reaching files at different layers but
+// over one FAT engine (see ARCHITECTURE.md §6):
+//
+//   * BlOsLoader opens a raw partition with ArcOpen, then layers FAT itself via
+//     BlOpen (FAT *above* the vector). For it, AEOpen need only return a raw block
+//     device - the x86 ScsiDiskOpen role.
+//   * arcdos is an ARC application: it calls ArcOpen/ArcGetDirectoryEntry on a full
+//     file path and expects the *firmware* to parse FAT and hand back a file (FAT
+//     *below* the vector) - the MIPS firmware FwOpen role (FW/MIPS/FWIO.C). So
+//     AEOpen also splits device/file, opens the device, and mounts+opens the file
+//     through BlOpen, and AERead/AESeek/AEClose/AEGetFileInformation/
+//     AEGetDirectoryEntry dispatch through BlFileTable[fid].DeviceEntryTable - the
+//     pattern of x86 AERead (ARCEMUL.C:987) and FwRead/FwGetDirectoryEntry.
+//
+#include "bootlib.h"
 #include "string.h"
 
 //
-// PL011 primitives (loader/arm/uart.c).
-//
-// Two distinct NT lineages meet in the AE* routines below, and it is worth
-// keeping them straight:
-//
-//   * The vector-emulation scaffolding - building GlobalSystemBlock in RAM,
-//     dispatching through GlobalFirmwareVectors[], and mapping the ArcOpen
-//     contract onto fixed file ids - is the x86 pattern (I386/ARCEMUL.C). x86 is
-//     the *only* NT arch whose loader emulates the firmware vector, because it
-//     is the only one with no ARC ROM; MIPS/Alpha/PPC loaders consume a vector
-//     the ROM already placed at a fixed address (see SYSTEM_BLOCK in arc.h). The
-//     Pi has no ROM either, so this is the lineage we inherit for the plumbing.
-//
-//   * The device backend - actually moving bytes - is NOT the x86 BIOS (int
-//     10h/16h, meaningless here). It is a memory-mapped serial driver, i.e. the
-//     ARM analog of the RISC ARC firmware's serial line driver FW/MIPS/JXSERIAL.C
-//     (SerialOpen/Read/Write over UART registers). Our backend is the PL011.
+// PL011 + console primitives (loader/arm/uart.c, console.c) and USB-keyboard input
+// (loader/arm/usb.c). The console is the ARM analog of the RISC firmware serial
+// driver FW/MIPS/JXSERIAL.C; its input side polls both the PL011 RX and a USB HID
+// keyboard so the loader takes keystrokes from whichever is present.
 //
 void uart_putc(int c);
 int uart_getc(void);
 int uart_rx_ready(void);
 void console_putc(int c);
-
-//
-// USB keyboard input (loader/arm/usb.c). The console is bidirectional like the RISC
-// firmware's serial line, but its *input* side now has two backends: the PL011 RX
-// (serial cable) and a USB HID keyboard. AERead/AEReadStatus poll both so the loader
-// takes keystrokes from whichever is present - a serial host in QEMU, or a USB
-// keyboard plugged into a standalone Pi. usb_kbd_rx_ready() drives one HID poll and
-// reports whether a decoded byte is buffered; usb_kbd_getc() pops it.
-//
 int usb_kbd_present(void);
 int usb_kbd_rx_ready(void);
 int usb_kbd_getc(void);
 
 //
 // Framebuffer console cursor query (loader/arm/fbcon.c), 0-based. Backs
-// AEGetDisplayStatus, the ArcGetDisplayStatus vector slot the arcdos line editor
-// uses to anchor its prompt and redraw the input line.
+// AEGetDisplayStatus, the ArcGetDisplayStatus slot the arcdos line editor uses.
 //
 void fbcon_status(unsigned int *col, unsigned int *row,
                   unsigned int *maxcol, unsigned int *maxrow);
 
 //
+// The RAM-disk block device (loader/arm/ramdisk.c) - the ScsiDiskEntryTable analog
+// AEOpen installs for a disk/partition name. RamdiskReadSectors backs the MBR read
+// AEOpen does to find a partition's base LBA.
+//
+extern BL_DEVICE_ENTRY_TABLE RamdiskEntryTable;
+ARC_STATUS RamdiskReadSectors(ULONG Lba, ULONG Count, PVOID Buffer);
+ULONG RamdiskTotalSectors(VOID);
+
+//
 // The console is a headless serial line. The RISC ARC firmware names its serial
 // ports "multi(0)serial(N)" (FW/MIPS/JXSERIAL.C); we expose port 0 as the one
-// bidirectional console device, and init.c points both consolein= and
-// consoleout= at it. A serial port carries both directions, so unlike the x86
-// split (video out + keyboard in) there is a single name; AEOpen maps the open
-// mode to the input/output file id the rest of the emulation uses.
+// bidirectional console device, and init.c points both consolein= and consoleout=
+// at it. A serial port carries both directions, so unlike the x86 split (video out
+// + keyboard in) there is a single name; AEOpen maps the open mode to the in/out id.
 //
 #define SERIAL_CONSOLE_NAME "multi(0)serial(0)"
 
+//
+// Fixed console file ids, matching x86 (console-in 0, console-out 1). Disk/file fids
+// start at BOOT_FILEID (2). Slots 0/1 are reserved in BlFileTable so BlOpen's
+// free-slot search (which starts at 0) never hands a FAT file the console's slot.
+//
 #define ARC_CONSOLE_INPUT  0
 #define ARC_CONSOLE_OUTPUT 1
 
+#define IS_CONSOLE_FID(id) ((id) == ARC_CONSOLE_INPUT || (id) == ARC_CONSOLE_OUTPUT)
+
 //
-// The firmware vector and the system parameter block that points at it.
-// Mirrors the static initialization in I386/ARCEMUL.C.
-//
-// GlobalFirmwareVectors lives in BSS, so every slot is NULL until
-// BlArmInitializeArcEmulator() runs. Do NOT issue any Arc* call (which
-// dispatches through this vector) before that init runs - BlStartup() calls it
-// first thing, before BlOsLoader().
+// The firmware vector and the system parameter block that points at it. Mirrors the
+// static initialization in I386/ARCEMUL.C. GlobalFirmwareVectors lives in BSS, so
+// every slot is NULL until BlArmInitializeArcEmulator() runs (BlStartup calls it
+// before any Arc* call dispatches through the vector).
 //
 PVOID GlobalFirmwareVectors[MaximumRoutine];
 
@@ -96,12 +100,6 @@ SYSTEM_PARAMETER_BLOCK GlobalSystemBlock =
         NULL                            // Pointer to vendor vector block
     };
 
-//
-// BlLoaderBlock now lives in the ported BLMEMORY.C, which allocates it from the
-// loader heap in BlMemoryInitialize() and owns it. The BSS placeholder that used
-// to sit here is gone (it would now be a duplicate symbol).
-//
-
 ARC_STATUS
 BlArcNotYetImplemented(
     IN ULONG FileId
@@ -112,12 +110,148 @@ BlArcNotYetImplemented(
 }
 
 //
-// AEOpen - emulate ArcOpen. The dispatch/contract shape follows I386/ARCEMUL.C
-// (recognize the device, hand back a fixed file id); the device itself is the
-// serial console (FW/MIPS/JXSERIAL.C SerialOpen). One bidirectional serial port
-// serves both console directions, so open mode - not the path - selects the
-// input vs output file id. Disk/partition opens will chain in here later; until
-// then anything else is ENOENT.
+// ---- device/file open ------------------------------------------------------
+//
+// Read a little-endian 32-bit field out of a byte buffer (MBR fields are LE and
+// unaligned).
+//
+static ULONG
+le32(const unsigned char *p)
+{
+    //
+    // MBR partition fields are unaligned (partition(1)'s LBA is at offset 0x1C6).
+    // The bytes are read through a volatile pointer so the compiler cannot fuse them
+    // into one 32-bit LDR/LDRD - that would alignment-fault on Cortex-A7 (ARCHITECTURE.md
+    // §4 "LDM/STM alignment"). Volatile forces four independent LDRB, always safe.
+    //
+    const volatile unsigned char *v = p;
+    return (ULONG)v[0] | ((ULONG)v[1] << 8) | ((ULONG)v[2] << 16) | ((ULONG)v[3] << 24);
+}
+
+//
+// Pull the partition number out of an ARC device name "...partition(N)". Returns
+// the number, or -1 if the name has no partition() component. Done by hand to avoid
+// depending on strstr.
+//
+static int
+ParsePartitionNumber(
+    IN PCHAR Device
+    )
+{
+    static const char tag[] = "partition(";
+    PCHAR p;
+
+    for (p = Device; *p; p += 1) {
+        ULONG i = 0;
+        while (tag[i] && p[i] == tag[i]) {
+            i += 1;
+        }
+        if (tag[i] == 0) {
+            PCHAR q = p + i;
+            int n = 0, got = 0;
+            while (*q >= '0' && *q <= '9') {
+                n = n * 10 + (*q - '0');
+                q += 1;
+                got = 1;
+            }
+            if (got && *q == ')') {
+                return n;
+            }
+        }
+    }
+    return -1;
+}
+
+//
+// Open a disk/partition device by ARC name and return its file id. Mirrors the x86
+// BiosPartitionOpen/ScsiDiskOpen role: recognize the name, find the partition's base
+// LBA (parse the MBR for partition N >= 1; partition(0) is the whole disk), allocate
+// a BlFileTable slot, and install &RamdiskEntryTable. An already-open device with the
+// same base LBA is reused, so repeated file opens (arcdos dir/type) don't leak fids
+// - the minimal analog of the MIPS firmware's OpenedPathTable.
+//
+static ARC_STATUS
+AEDeviceOpen(
+    IN PCHAR Device,
+    OUT PULONG FileId
+    )
+{
+    unsigned char mbr[SECTOR_SIZE];
+    ULONG startLba, sectorCount;
+    ULONG fid;
+    int part;
+
+    part = ParsePartitionNumber(Device);
+    if (part < 0) {
+        return ENODEV;
+    }
+
+    if (part == 0) {
+        startLba = 0;
+        sectorCount = RamdiskTotalSectors();
+    } else {
+        const unsigned char *entry;
+        ARC_STATUS s = RamdiskReadSectors(0, 1, mbr);
+        if (s != ESUCCESS) {
+            return s;
+        }
+        if (mbr[510] != 0x55 || mbr[511] != 0xAA) {
+            return EIO;                 // no valid MBR -> no partitions
+        }
+        if (part > 4) {
+            return ENODEV;              // only the 4 primary MBR entries
+        }
+        entry = &mbr[0x1BE + (part - 1) * 16];
+        startLba = le32(entry + 8);
+        sectorCount = le32(entry + 12);
+        if (sectorCount == 0) {
+            return ENODEV;              // unused partition slot
+        }
+    }
+
+    //
+    // Reuse an already-open device on the same base LBA.
+    //
+    for (fid = BOOT_FILEID; fid < BL_FILE_TABLE_SIZE; fid += 1) {
+        if (BlFileTable[fid].Flags.Open &&
+            BlFileTable[fid].DeviceEntryTable == &RamdiskEntryTable &&
+            BlFileTable[fid].u.PartitionContext.StartingSector == startLba) {
+            *FileId = fid;
+            return ESUCCESS;
+        }
+    }
+
+    //
+    // Allocate a fresh slot (>= BOOT_FILEID; 0/1 are the console).
+    //
+    for (fid = BOOT_FILEID; fid < BL_FILE_TABLE_SIZE; fid += 1) {
+        if (BlFileTable[fid].Flags.Open == 0) {
+            break;
+        }
+    }
+    if (fid == BL_FILE_TABLE_SIZE) {
+        return EMFILE;
+    }
+
+    memset(&BlFileTable[fid], 0, sizeof(BL_FILE_TABLE));
+    BlFileTable[fid].Flags.Open = 1;
+    BlFileTable[fid].Flags.Read = 1;
+    BlFileTable[fid].DeviceEntryTable = &RamdiskEntryTable;
+    BlFileTable[fid].u.PartitionContext.StartingSector = startLba;
+    BlFileTable[fid].u.PartitionContext.PartitionLength.LowPart = sectorCount * SECTOR_SIZE;
+    BlFileTable[fid].u.PartitionContext.PartitionLength.HighPart = 0;
+
+    *FileId = fid;
+    return ESUCCESS;
+}
+
+//
+// AEOpen - emulate ArcOpen. Console -> fixed in/out id; otherwise split the ARC path
+// at the last ')' into a device name and a file path (the FW/MIPS/FWIO.C FwOpen
+// model). With no file part, return the raw device (what BlOsLoader's
+// ArcOpen("...partition(1)") at osloader.c:388 wants). With a file part, open the
+// device then mount FAT and open the file through BlOpen (what arcdos's file opens
+// want) - one FAT engine, both consumers.
 //
 ARC_STATUS
 AEOpen(
@@ -126,45 +260,101 @@ AEOpen(
     OUT PULONG FileId
     )
 {
-    if (stricmp(OpenPath, SERIAL_CONSOLE_NAME) != 0) {
-        return ENOENT;
-    }
+    CHAR device[128];
+    PCHAR lastParen, filePart, p;
+    ULONG deviceFid;
+    ARC_STATUS Status;
 
-    if (OpenMode == ArcOpenReadOnly) {
-        *FileId = ARC_CONSOLE_INPUT;
+    //
+    // Console - the one bidirectional serial device; open mode picks the direction.
+    // Reserve the slot so BlOpen's allocator never reuses it for a FAT file.
+    //
+    if (stricmp(OpenPath, SERIAL_CONSOLE_NAME) == 0) {
+        ULONG id = (OpenMode == ArcOpenWriteOnly) ? ARC_CONSOLE_OUTPUT : ARC_CONSOLE_INPUT;
+        if (OpenMode == ArcOpenReadWrite) {
+            return EACCES;
+        }
+        BlFileTable[id].Flags.Open = 1;
+        BlFileTable[id].Flags.Read = (id == ARC_CONSOLE_INPUT);
+        BlFileTable[id].Flags.Write = (id == ARC_CONSOLE_OUTPUT);
+        BlFileTable[id].DeviceEntryTable = NULL;     // console is fid-special-cased
+        *FileId = id;
         return ESUCCESS;
     }
 
-    if (OpenMode == ArcOpenWriteOnly) {
-        *FileId = ARC_CONSOLE_OUTPUT;
-        return ESUCCESS;
+    //
+    // Split device / file at the last ')'.
+    //
+    lastParen = NULL;
+    for (p = OpenPath; *p; p += 1) {
+        if (*p == ')') {
+            lastParen = p;
+        }
+    }
+    if (lastParen == NULL) {
+        return ENOENT;                  // not a console and not an ARC device path
     }
 
-    return EACCES;
+    {
+        ULONG dlen = (ULONG)(lastParen - OpenPath) + 1;
+        if (dlen >= sizeof(device)) {
+            return ENAMETOOLONG;
+        }
+        memcpy(device, OpenPath, dlen);
+        device[dlen] = 0;
+        filePart = lastParen + 1;
+    }
+
+    Status = AEDeviceOpen(device, &deviceFid);
+    if (Status != ESUCCESS) {
+        return Status;
+    }
+
+    //
+    // No file component: the open mode disambiguates the two consumers (as the MIPS
+    // firmware's FwOpen does). A data open (read/write) of a bare partition wants the
+    // RAW block device - this is BlOsLoader's ArcOpen("...partition(1)") at
+    // osloader.c:388, which then layers FAT itself via BlOpen. A directory open of a
+    // bare partition wants the FAT ROOT directory - this is arcdos's `dir`, which opens
+    // "...partition(1)" (no trailing path) with OpenDirectory. Map the latter to "\".
+    //
+    if (*filePart == 0) {
+        if (OpenMode != ArcOpenDirectory) {
+            *FileId = deviceFid;
+            return ESUCCESS;
+        }
+        filePart = "\\";
+    }
+
+    //
+    // File/directory component -> recognize the filesystem on the device and open it.
+    // BlOpen runs IsFatFileStructure -> FatOpen and records DeviceId = deviceFid, so
+    // reads flow FatDiskRead -> ArcRead(deviceFid) -> RamdiskRead.
+    //
+    return BlOpen(deviceFid, filePart, OpenMode, FileId);
 }
 
 //
-// AEClose (JXSERIAL.C SerialClose analog) - the serial console holds no state to
-// tear down, so closing either direction just succeeds. Non-console ids are not
-// openable yet, so reaching here with one is a bug.
+// AEClose - console closes succeed (no state); everything else dispatches to the
+// device/FS Close. (A reused device fid is left open on purpose - see AEDeviceOpen.)
 //
 ARC_STATUS
 AEClose(
     IN ULONG FileId
     )
 {
-    if (FileId == ARC_CONSOLE_INPUT || FileId == ARC_CONSOLE_OUTPUT) {
+    if (IS_CONSOLE_FID(FileId)) {
         return ESUCCESS;
     }
-
-    return BlArcNotYetImplemented(FileId);
+    if (BlFileTable[FileId].DeviceEntryTable == NULL) {
+        return EBADF;
+    }
+    return (BlFileTable[FileId].DeviceEntryTable->Close)(FileId);
 }
 
 //
-// AEWrite (JXSERIAL.C SerialWrite analog) - emulate ArcWrite. Only console
-// output is implemented: push the exact byte count to the PL011 TX (the loader
-// supplies its own CR/LF), report it all written. This is the routine
-// BlOsLoader's "OS Loader V3.5" banner reaches.
+// AEWrite - console output pushes bytes to the unified console (serial + HDMI); any
+// other fid dispatches to the device/FS Write.
 //
 ARC_STATUS
 AEWrite(
@@ -177,25 +367,26 @@ AEWrite(
     const unsigned char *p;
     ULONG i;
 
-    if (FileId != ARC_CONSOLE_OUTPUT) {
-        return BlArcNotYetImplemented(FileId);
+    if (FileId == ARC_CONSOLE_OUTPUT) {
+        p = (const unsigned char *)Buffer;
+        for (i = 0; i < Length; i += 1) {
+            console_putc(p[i]);
+        }
+        *Count = Length;
+        return ESUCCESS;
     }
 
-    p = (const unsigned char *)Buffer;
-    for (i = 0; i < Length; i += 1) {
-        console_putc(p[i]);
+    if (BlFileTable[FileId].DeviceEntryTable == NULL ||
+        BlFileTable[FileId].DeviceEntryTable->Write == NULL) {
+        return EACCES;
     }
-
-    *Count = Length;
-    return ESUCCESS;
+    return (BlFileTable[FileId].DeviceEntryTable->Write)(FileId, Buffer, Length, Count);
 }
 
 //
-// AERead (JXSERIAL.C SerialRead analog) - emulate ArcRead. Only console input is
-// implemented: a blocking read of Length raw bytes, taken from whichever console
-// input backend has a byte first - the PL011 RX or the USB keyboard. Gated on the
-// console id (the ARCEMUL emulation convention); any other id is a not-yet-ported
-// device, never a hang.
+// AERead - console input is a blocking read taken from whichever input backend has a
+// byte first (PL011 RX or USB keyboard); any other fid dispatches to the device/FS
+// Read (which serves the exact byte count, FatDiskRead-style).
 //
 ARC_STATUS
 AERead(
@@ -208,56 +399,143 @@ AERead(
     unsigned char *p;
     ULONG i;
 
-    if (FileId != ARC_CONSOLE_INPUT) {
-        return BlArcNotYetImplemented(FileId);
-    }
-
-    p = (unsigned char *)Buffer;
-    for (i = 0; i < Length; i += 1) {
-        for (;;) {
-            if (uart_rx_ready()) {
-                p[i] = (unsigned char)uart_getc();
-                break;
-            }
-            if (usb_kbd_rx_ready()) {
-                int c = usb_kbd_getc();
-                if (c >= 0) {
-                    p[i] = (unsigned char)c;
+    if (FileId == ARC_CONSOLE_INPUT) {
+        p = (unsigned char *)Buffer;
+        for (i = 0; i < Length; i += 1) {
+            for (;;) {
+                if (uart_rx_ready()) {
+                    p[i] = (unsigned char)uart_getc();
                     break;
+                }
+                if (usb_kbd_rx_ready()) {
+                    int c = usb_kbd_getc();
+                    if (c >= 0) {
+                        p[i] = (unsigned char)c;
+                        break;
+                    }
                 }
             }
         }
+        *Count = Length;
+        return ESUCCESS;
     }
 
-    *Count = Length;
-    return ESUCCESS;
+    if (BlFileTable[FileId].DeviceEntryTable == NULL) {
+        return EBADF;
+    }
+    return (BlFileTable[FileId].DeviceEntryTable->Read)(FileId, Buffer, Length, Count);
 }
 
 //
-// AEReadStatus (JXSERIAL.C SerialGetReadStatus analog) - emulate ArcGetReadStatus.
-// ESUCCESS means at least one byte is available on the console - either the PL011 RX
-// is not empty or the USB keyboard has a decoded byte buffered; EAGAIN means none yet.
+// AEReadStatus - ESUCCESS means a byte is available. Console: PL011 RX non-empty or
+// a USB key buffered. Other fids dispatch if the device offers GetReadStatus, else
+// report ready (a disk always has data).
 //
 ARC_STATUS
 AEReadStatus(
     IN ULONG FileId
     )
 {
-    if (FileId != ARC_CONSOLE_INPUT) {
-        return BlArcNotYetImplemented(FileId);
+    if (FileId == ARC_CONSOLE_INPUT) {
+        return (uart_rx_ready() || usb_kbd_rx_ready()) ? ESUCCESS : EAGAIN;
     }
-
-    if (uart_rx_ready() || usb_kbd_rx_ready()) {
-        return ESUCCESS;
+    if (BlFileTable[FileId].DeviceEntryTable != NULL &&
+        BlFileTable[FileId].DeviceEntryTable->GetReadStatus != NULL) {
+        return (BlFileTable[FileId].DeviceEntryTable->GetReadStatus)(FileId);
     }
-
-    return EAGAIN;
+    return ESUCCESS;
 }
 
 //
-// AEGetMemoryDescriptor - emulate ArcGetMemoryDescriptor by walking the static
-// MDArray[] built in loader/arm/memory.c (verbatim shape of I386/ARCEMUL.C):
-// NULL returns the first descriptor, otherwise the next, NULL past the end.
+// AESeek - dispatch to the device/FS Seek (FatSeek for FAT files, RamdiskSeek for
+// raw devices). FatDiskRead calls ArcSeek+ArcRead per sector, so this MUST be a real
+// slot - it was BlArcNotYetImplemented before M2. Console seeks are a no-op.
+//
+ARC_STATUS
+AESeek(
+    IN ULONG FileId,
+    IN PLARGE_INTEGER Offset,
+    IN SEEK_MODE SeekMode
+    )
+{
+    if (IS_CONSOLE_FID(FileId)) {
+        return ESUCCESS;
+    }
+    if (BlFileTable[FileId].DeviceEntryTable == NULL ||
+        BlFileTable[FileId].DeviceEntryTable->Seek == NULL) {
+        return EBADF;
+    }
+    return (BlFileTable[FileId].DeviceEntryTable->Seek)(FileId, Offset, SeekMode);
+}
+
+//
+// AEGetFileInformation - dispatch to the device/FS GetFileInformation (FatGet... for
+// a FAT file gives size/attributes; arcdos type/copy/dir read it). NYI before M2.
+//
+ARC_STATUS
+AEGetFileInformation(
+    IN ULONG FileId,
+    OUT PFILE_INFORMATION FileInformation
+    )
+{
+    if (IS_CONSOLE_FID(FileId)) {
+        return EINVAL;
+    }
+    if (BlFileTable[FileId].DeviceEntryTable == NULL ||
+        BlFileTable[FileId].DeviceEntryTable->GetFileInformation == NULL) {
+        return EBADF;
+    }
+    return (BlFileTable[FileId].DeviceEntryTable->GetFileInformation)(FileId, FileInformation);
+}
+
+//
+// AESetFileInformation - dispatch to the device/FS SetFileInformation (arcdos uses it
+// to set attributes). Read-only FAT volumes will refuse via FatSet...; that is fine.
+//
+ARC_STATUS
+AESetFileInformation(
+    IN ULONG FileId,
+    IN ULONG AttributeFlags,
+    IN ULONG AttributeMask
+    )
+{
+    if (IS_CONSOLE_FID(FileId)) {
+        return EINVAL;
+    }
+    if (BlFileTable[FileId].DeviceEntryTable == NULL ||
+        BlFileTable[FileId].DeviceEntryTable->SetFileInformation == NULL) {
+        return EACCES;
+    }
+    return (BlFileTable[FileId].DeviceEntryTable->SetFileInformation)(FileId, AttributeFlags, AttributeMask);
+}
+
+//
+// AEGetDirectoryEntry - dispatch to the FS GetDirectoryEntry (FatGetDirectoryEntry).
+// This is what arcdos's "dir" calls: open a directory, then enumerate its entries.
+// NYI before M2 (the slot fell through to BlArcNotYetImplemented).
+//
+ARC_STATUS
+AEGetDirectoryEntry(
+    IN ULONG FileId,
+    OUT PDIRECTORY_ENTRY Buffer,
+    IN ULONG Length,
+    OUT PULONG Count
+    )
+{
+    if (IS_CONSOLE_FID(FileId)) {
+        return EBADF;
+    }
+    if (BlFileTable[FileId].DeviceEntryTable == NULL ||
+        BlFileTable[FileId].DeviceEntryTable->GetDirectoryEntry == NULL) {
+        return EBADF;
+    }
+    return (BlFileTable[FileId].DeviceEntryTable->GetDirectoryEntry)(FileId, Buffer, Length, Count);
+}
+
+//
+// AEGetMemoryDescriptor - walk the static MDArray[] built in loader/arm/memory.c
+// (verbatim shape of I386/ARCEMUL.C): NULL returns the first descriptor, otherwise
+// the next, NULL past the end.
 //
 extern MEMORY_DESCRIPTOR MDArray[];
 extern ULONG NumberDescriptors;
@@ -279,10 +557,9 @@ AEGetMemoryDescriptor(
 }
 
 //
-// AEReboot - emulate ArcReboot/ArcRestart via the BCM2836 PM watchdog
-// (0x3F100000): arm a short watchdog, then request a full reset. All writes
-// carry the 0x5A password in the high byte. Does not return. Wired for the halt
-// path; the current load flow never calls it, so it is untested at runtime.
+// AEReboot - emulate ArcReboot/ArcRestart via the BCM2836 PM watchdog (0x3F100000):
+// arm a short watchdog, then request a full reset. All writes carry the 0x5A password
+// in the high byte. Does not return.
 //
 #define PM_BASE     0x3F100000u
 #define PM_RSTC     (*(volatile unsigned int *)(PM_BASE + 0x1c))
@@ -307,9 +584,8 @@ AEReboot(
 // AEGetDisplayStatus - emulate ArcGetDisplayStatus (the JXDISP.C FwGetDisplayStatus
 // analog). Reports the framebuffer console cursor and extent; the arcdos editor reads
 // it to anchor each redraw. fbcon tracks the cursor 0-based, so add 1 to match the ARC
-// 1-based convention - exactly what FwGetDisplayStatus does. The fixed white-on-blue
-// scheme is reported as high-intensity white on blue. FileId is ignored (status is a
-// property of the one screen), as on the RISC firmware.
+// 1-based convention. The fixed white-on-blue scheme is reported as high-intensity
+// white on blue. FileId is ignored (status is a property of the one screen).
 //
 static ARC_DISPLAY_STATUS DisplayStatus;
 
@@ -337,12 +613,10 @@ AEGetDisplayStatus(
 }
 
 //
-// AEGetEnvironmentVariable - emulate ArcGetEnvironmentVariable. No ARC environment
-// is implemented yet, so every lookup misses (returns NULL). This MUST be a real slot
-// (not BlArcNotYetImplemented): arcdos's ParseCommandLine calls it for any token with a
-// ':' (e.g. "cd c:") before ever reaching Open, and the stub's ARC_STATUS(ULONG)
-// signature is wrong for a PCHAR(PCHAR) call - it would hand back EINVAL(=7) as a char*
-// and crash strlen(). NULL is the right miss: arcdos maps it to "Undefined environment
+// AEGetEnvironmentVariable - emulate ArcGetEnvironmentVariable. No ARC environment is
+// implemented, so every lookup misses (returns NULL). This MUST be a real slot (not
+// BlArcNotYetImplemented): arcdos's ParseCommandLine calls it for any token with a
+// ':' before reaching Open, and arcdos maps the NULL miss to "Undefined environment
 // variable" and re-prompts cleanly.
 //
 PCHAR
@@ -355,9 +629,12 @@ AEGetEnvironmentVariable(
 }
 
 //
-// Populate the firmware vector. ARM analog of I386/ARCEMUL.C's vector fill.
-// Every slot starts at BlArcNotYetImplemented; the implemented routines below
-// override the console (open/close/read/read-status/write), memory, and halt slots.
+// Populate the firmware vector. ARM analog of I386/ARCEMUL.C's vector fill. Every slot
+// starts at BlArcNotYetImplemented; the implemented routines override the console,
+// disk/file I/O (open/close/read/read-status/write/seek/file-info/dir-entry), memory,
+// halt, and display slots. Reserve console fids 0/1 in BlFileTable up front so the
+// arcdos path (which never calls BlIoInitialize) cannot allocate them to a file; the
+// BlOsLoader path re-establishes them when it opens the console after BlIoInitialize.
 //
 VOID
 BlArmInitializeArcEmulator(
@@ -375,9 +652,18 @@ BlArmInitializeArcEmulator(
     GlobalFirmwareVectors[ReadRoutine]       = (PVOID)AERead;
     GlobalFirmwareVectors[ReadStatusRoutine] = (PVOID)AEReadStatus;
     GlobalFirmwareVectors[WriteRoutine]      = (PVOID)AEWrite;
+    GlobalFirmwareVectors[SeekRoutine]       = (PVOID)AESeek;
+    GlobalFirmwareVectors[GetFileInformationRoutine] = (PVOID)AEGetFileInformation;
+    GlobalFirmwareVectors[SetFileInformationRoutine] = (PVOID)AESetFileInformation;
+    GlobalFirmwareVectors[GetDirectoryEntryRoutine]  = (PVOID)AEGetDirectoryEntry;
     GlobalFirmwareVectors[MemoryRoutine]     = (PVOID)AEGetMemoryDescriptor;
     GlobalFirmwareVectors[RestartRoutine]    = (PVOID)AEReboot;
     GlobalFirmwareVectors[RebootRoutine]     = (PVOID)AEReboot;
     GlobalFirmwareVectors[GetDisplayStatusRoutine] = (PVOID)AEGetDisplayStatus;
     GlobalFirmwareVectors[GetEnvironmentRoutine]   = (PVOID)AEGetEnvironmentVariable;
+
+    BlFileTable[ARC_CONSOLE_INPUT].Flags.Open = 1;
+    BlFileTable[ARC_CONSOLE_INPUT].Flags.Read = 1;
+    BlFileTable[ARC_CONSOLE_OUTPUT].Flags.Open = 1;
+    BlFileTable[ARC_CONSOLE_OUTPUT].Flags.Write = 1;
 }

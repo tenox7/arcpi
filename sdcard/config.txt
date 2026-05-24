@@ -8,6 +8,15 @@
 arm_64bit=0
 kernel=loader.bin
 
+# Stage the FAT disk image in RAM, exactly as an initrd is loaded for Linux: the GPU
+# firmware reads ramdisk.img off this (FAT32) boot partition and places it at 0x00800000
+# (8 MiB) before entering the loader at 0x8000. The loader serves it as its Arc disk, so
+# no in-loader SD driver is needed. NOTE: this directive uses a SPACE, not '=', and only
+# takes effect with a loader built RAMDISK_INITRAMFS=1 (see ARM32/build/Makefile); a
+# default (embedded-blob) loader ignores the staged image harmlessly. 8 MiB sits above
+# the loader+stack and below the device tree at 0x02000000.
+initramfs ramdisk.img 0x00800000
+
 # Pin the device tree well clear of the loader. The loader image + stack span
 # ~0x8000-0x21800; default DTB placement varies by firmware version and can land in
 # that range, which our stack would then clobber (a silent crash in C - the loader

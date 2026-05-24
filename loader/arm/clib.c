@@ -233,3 +233,20 @@ LARGE_INTEGER RtlConvertUlongToLargeInteger(IN ULONG UnsignedInteger)
     li.QuadPart = (LONGLONG)(ULONGLONG)UnsignedInteger;
     return li;
 }
+
+//
+// RtlInitString - point a counted STRING at a null-terminated C string (FATBOOT.C's
+// FatOpen/FatRename use it to wrap the path). Length excludes the NUL, MaximumLength
+// includes it; the buffer is not copied.
+//
+VOID RtlInitString(OUT PSTRING DestinationString, IN PCHAR SourceString)
+{
+    DestinationString->Buffer = SourceString;
+    if (SourceString != NULL) {
+        DestinationString->Length = (USHORT)strlen(SourceString);
+        DestinationString->MaximumLength = (USHORT)(DestinationString->Length + 1);
+    } else {
+        DestinationString->Length = 0;
+        DestinationString->MaximumLength = 0;
+    }
+}

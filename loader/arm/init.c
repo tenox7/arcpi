@@ -10,8 +10,14 @@
 // the still-stubbed storage/filesystem path.
 //
 #include "bldr.h"
+#include "string.h"
 
 VOID BlArmInitializeArcEmulator(VOID);
+VOID BlArmFixupMemoryMap(VOID);
+
+// Establish the Arc disk image's RAM location/size (the embedded blob under QEMU, or
+// the firmware-staged initramfs on real hardware) before the memory-map fixup reads it.
+VOID RamdiskInit(VOID);
 
 // HDMI framebuffer console: allocate the VC framebuffer, then bring up the text
 // console layered on it (white-on-black 8x8 font). After this every BlPrint /
@@ -29,6 +35,15 @@ int ArcDosMain(void);
 
 // BCM2835 system timer (loader/arm/timer.c) - used to bound the console echo test.
 unsigned int timer_us(void);
+
+//
+// M2b bring-up self-test: prove the Arc disk reads sectors through the emulated
+// firmware vector. Opens the load partition (AEOpen parses the MBR for its base LBA),
+// reads its first sector, and prints the FAT16 boot-sector fingerprint. Exercises
+// AEOpen(device) -> AERead -> RamdiskEntryTable end to end, independent of FAT/arcdos.
+// Set to 0 once M2c (FAT) is verified.
+//
+#define RAMDISK_TEST 0
 
 //
 // Synthesized ARC argument vector. Argument names mirror what INITX86.C builds.
@@ -151,6 +166,79 @@ BlArmConsoleEchoTest(VOID)
 }
 #endif
 
+#if RAMDISK_TEST
+static VOID
+BlArmRamdiskTest(VOID)
+{
+    ULONG fid, count;
+    unsigned char sec[512];
+    char oem[9];
+    ARC_STATUS s;
+
+    s = ArcOpen("multi(0)disk(0)rdisk(0)partition(1)", ArcOpenReadOnly, &fid);
+    BlPrint("RAMDISK: open partition(1) -> status %lx fid %lx\n",
+            (unsigned long)s, (unsigned long)fid);
+    if (s != ESUCCESS) {
+        return;
+    }
+
+    s = ArcRead(fid, sec, sizeof(sec), &count);
+    BlPrint("RAMDISK: read boot sector -> status %lx count %lx\n",
+            (unsigned long)s, (unsigned long)count);
+    if (s == ESUCCESS && count == sizeof(sec)) {
+        memcpy(oem, &sec[3], 8);        // FAT BPB OEM name
+        oem[8] = 0;
+        BlPrint("RAMDISK: jmp=%02x%02x%02x OEM='%s' sig=%02x%02x\n",
+                sec[0], sec[1], sec[2], oem, sec[510], sec[511]);
+    }
+    ArcClose(fid);
+
+    //
+    // FAT file read (the arcdos "type" path): open a real file by full ARC path
+    // (AEOpen splits device/file -> BlOpen -> IsFatFileStructure -> FatOpen) and read
+    // it (AERead -> FatRead). Proves the whole FAT engine end to end.
+    //
+    {
+        ULONG ffid, fcount;
+        char fbuf[80];
+        s = ArcOpen("multi(0)disk(0)rdisk(0)partition(1)\\HELLO.TXT", ArcOpenReadOnly, &ffid);
+        BlPrint("FAT: open \\HELLO.TXT -> status %lx fid %lx\n",
+                (unsigned long)s, (unsigned long)ffid);
+        if (s == ESUCCESS) {
+            s = ArcRead(ffid, fbuf, sizeof(fbuf) - 1, &fcount);
+            if (s == ESUCCESS) {
+                fbuf[fcount] = 0;
+                BlPrint("FAT: read %lx bytes: %s\n", (unsigned long)fcount, fbuf);
+            }
+            ArcClose(ffid);
+        }
+    }
+
+    //
+    // FAT directory listing (the arcdos "dir" path): open the root directory and
+    // enumerate it (ArcGetDirectoryEntry -> FatGetDirectoryEntry).
+    //
+    {
+        ULONG dfid, dcount;
+        DIRECTORY_ENTRY de;
+        s = ArcOpen("multi(0)disk(0)rdisk(0)partition(1)\\", ArcOpenDirectory, &dfid);
+        BlPrint("FAT: open root dir -> status %lx fid %lx\n",
+                (unsigned long)s, (unsigned long)dfid);
+        if (s == ESUCCESS) {
+            for (;;) {
+                s = ArcGetDirectoryEntry(dfid, &de, 1, &dcount);
+                if (s != ESUCCESS || dcount != 1) {
+                    break;
+                }
+                de.FileName[de.FileNameLength < 32 ? de.FileNameLength : 31] = 0;
+                BlPrint("FAT:   %s attr=%02x\n", de.FileName, de.FileAttribute);
+            }
+            ArcClose(dfid);
+        }
+    }
+}
+#endif
+
 VOID
 BlStartup(
     IN PCHAR PartitionName
@@ -178,8 +266,21 @@ BlStartup(
     //
     BlArmInitializeArcEmulator();
 
+    //
+    // Locate the Arc disk image in RAM (embedded blob under QEMU, or the firmware-
+    // staged initramfs on real hardware), then correct the physical memory map so the
+    // loader heap stays off it (BlMemoryInitialize, inside BlOsLoader, walks the map).
+    // RamdiskInit must run first: BlArmFixupMemoryMap reads its region.
+    //
+    RamdiskInit();
+    BlArmFixupMemoryMap();
+
     BlPrint("\nNT OS Loader (ARM32 / Raspberry Pi 2)\n");
     BlPrint("Loaded from: %s\n", PartitionName ? PartitionName : "(unknown)");
+
+#if RAMDISK_TEST
+    BlArmRamdiskTest();
+#endif
 
 #if CONSOLE_ECHO_TEST
     BlArmConsoleEchoTest();

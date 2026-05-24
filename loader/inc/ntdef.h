@@ -52,6 +52,19 @@ Revision History:
 
 #if defined(_MIPS_) || defined(_ALPHA_) || defined(_PPC_) // winnt
 #define UNALIGNED __unaligned               // winnt
+#elif defined(_ARM_)
+//
+// ARM port: MSVC's __unaligned has no GCC cast-qualifier equivalent, so map UNALIGNED
+// to `volatile`. The FAT on-disk readers (CopyUchar*/FatUnpackBios in fat.h/fatboot.c)
+// pull 16/32-bit fields out of packed, unaligned structures via `*(UNALIGNED T *)p`.
+// With UNALIGNED empty, GCC -O2 fuses adjacent packed reads into one LDRD/LDM, which
+// alignment-faults on an unaligned address even when SCTLR.A is clear. `volatile`
+// forces each access to be issued at exactly its written width (a single LDRH/LDR,
+// never fused) - and those single unaligned loads are legal because start.S clears
+// SCTLR.A. (Cortex-A7 handles unaligned LDR/LDRH/STR/STRH natively; only LDRD/LDM/STM
+// require alignment, which this avoids.)
+//
+#define UNALIGNED volatile
 #else                                       // winnt
 #define UNALIGNED                           // winnt
 #endif                                      // winnt

@@ -1,27 +1,38 @@
 #!/usr/bin/env bash
 # Build a flashable SD image that boots the NT 3.5 ARC loader on a real Raspberry
 # Pi 2 with HDMI output. Layout: MBR + a single FAT32 partition holding the Pi GPU
-# firmware, config.txt, and our loader.bin (as kernel=loader.bin).
+# firmware, config.txt, our loader.bin (as kernel=loader.bin), and ramdisk.img.
+#
+# ramdisk.img is the FAT16 Arc disk image (loader/ramdisk/make-ramdisk.sh). config.txt's
+# "initramfs ramdisk.img 0x00800000" makes the firmware stage it in RAM before entering
+# the loader, exactly as an initrd is loaded for Linux - so the loader reads its files
+# from RAM and needs no in-loader SD driver. The boot partition stays FAT32 because the
+# loader reads the *contents* of ramdisk.img (its own FAT16), never this partition's FS.
+# To use the staged image, build the loader with RAMDISK_INITRAMFS=1 (see build/Makefile);
+# a default embedded-blob loader still boots here but ignores the staged copy.
 #
 # Modeled on /Users/tenox/VM/RPI/make-sd-image.sh (the proven U-Boot recipe), but
 # boots our raw loader directly instead of U-Boot. The loader is linked at 0x8000
 # (the firmware's native 32-bit load address), so no kernel_address is needed.
 #
-# Usage:  cd ARM32/build && ./build.sh        # produce ../obj/loader.bin first
-#         cd ../sdcard && ./make-sd-image.sh   # -> ../obj/nt-loader-sd.img
+# Usage:  cd ARM32/loader/ramdisk && ./make-ramdisk.sh   # -> ../../obj/ramdisk.img
+#         cd ARM32/build && ./build.sh RAMDISK_INITRAMFS=1  # -> ../obj/loader.bin
+#         cd ../sdcard && ./make-sd-image.sh                # -> ../obj/nt-loader-sd.img
 # Flash:  sudo dd if=../obj/nt-loader-sd.img of=/dev/rdiskN bs=4m   (diskutil list)
 set -euo pipefail
 
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 LOADER="../obj/loader.bin"
+RAMDISK="../obj/ramdisk.img"
 IMG="../obj/nt-loader-sd.img"
 FWCACHE="firmware"
 SIZE_MB=64
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "missing required tool: $1"; exit 1; }; }
 need docker
-[[ -f "$LOADER" ]] || { echo "missing $LOADER - build it first: (cd ../build && ./build.sh)"; exit 1; }
+[[ -f "$LOADER" ]] || { echo "missing $LOADER - build it first: (cd ../build && ./build.sh RAMDISK_INITRAMFS=1)"; exit 1; }
+[[ -f "$RAMDISK" ]] || { echo "missing $RAMDISK - build it first: (cd ../loader/ramdisk && ./make-ramdisk.sh)"; exit 1; }
 
 # Cache the Pi firmware locally so repeated builds do not re-download.
 mkdir -p "$FWCACHE"
@@ -45,6 +56,7 @@ rm -rf /tmp/sd && mkdir -p /tmp/sd
 cp firmware/bootcode.bin firmware/start.elf firmware/fixup.dat firmware/bcm2709-rpi-2-b.dtb /tmp/sd/
 cp config.txt /tmp/sd/config.txt
 cp ../obj/loader.bin /tmp/sd/loader.bin
+cp ../obj/ramdisk.img /tmp/sd/ramdisk.img
 
 dd if=/dev/zero of="$IMG" bs=1M count="$SIZE_MB" status=none
 printf "label: dos\nstart=2048, type=c, bootable\n" | sfdisk "$IMG" >/dev/null

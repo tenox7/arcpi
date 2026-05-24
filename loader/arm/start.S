@@ -40,6 +40,19 @@ _start:
     eret                                // exception-return into SVC at label 3
 3:  cps     #0x13                       // ensure SVC (no-op if we just switched)
 
+    // --- Allow unaligned accesses (clear SCTLR.A) ---
+    // The ported NT filesystem code reads packed on-disk structures (FAT BPB,
+    // dirents) through `UNALIGNED` casts that GCC compiles to plain LDR/LDRH at
+    // unaligned addresses. NT's UNALIGNED (__unaligned on MSVC) is empty for GCC, so
+    // those accesses must be legal at the hardware level. ARMv7 handles unaligned
+    // LDR/LDRH/STR/STRH natively when SCTLR.A is clear (as Linux/U-Boot run); the
+    // firmware may leave it set, so clear it here before any C runs. (LDRD/STM still
+    // require alignment regardless - those stay the compiler's concern.)
+    mrc     p15, 0, r0, c1, c0, 0       // read SCTLR
+    bic     r0, r0, #(1 << 1)           // clear A (alignment-check enable)
+    mcr     p15, 0, r0, c1, c0, 0       // write SCTLR
+    isb
+
     // --- 3. Stack (now SVC-banked), cache/BP invalidate, BSS, cmain ---
     ldr     sp, =_stack_top
 

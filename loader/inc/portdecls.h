@@ -20,6 +20,7 @@
 //
 PIMAGE_NT_HEADERS RtlImageNtHeader(IN PVOID Base);
 LARGE_INTEGER RtlConvertUlongToLargeInteger(IN ULONG UnsignedInteger);
+VOID RtlInitString(OUT PSTRING DestinationString, IN PCHAR SourceString);
 
 //
 // ke.h - searches the ARC configuration tree.

@@ -1,0 +1,6 @@
+PLACEHOLDER - not a real PE image.
+
+This is the slot where the NT kernel image will go once it is built. The
+loader's PE-load + handoff path (M3) will read it from here. For now it is a
+stand-in so the OS directory has a kernel-sized file to list. Replace it by
+having the kernel build write its output to loader/ramdisk/root/OS/NTOSKRNL.EXE.

@@ -8,6 +8,12 @@ INCDIR    := ../loader/inc
 PAYLOADDIR := ../loader/payload
 OBJDIR    := ../obj
 
+# Arc disk image source. 0 (default) embeds the FAT image as a blob for QEMU; 1 omits
+# the blob and serves the image the Pi firmware stages in RAM via config.txt's
+# "initramfs ramdisk.img 0x00800000" (real-hardware SD boot - no in-loader SD driver).
+# Build the SD variant with: ./build.sh RAMDISK_INITRAMFS=1
+RAMDISK_INITRAMFS ?= 0
+
 # Freestanding Cortex-A7. NT-source flags: lowercase-named shim headers in
 # loader/inc come first; _ARM_ selects the ARM branches added to the copied NT
 # headers; _NTSYSTEM_ matches the original bldr build (NTSYSAPI -> empty);
@@ -26,7 +32,8 @@ CFLAGS  := -mcpu=cortex-a7 -marm -mfloat-abi=soft \
            -Wno-missing-field-initializers -Wno-parentheses -Wno-unused-label \
            -Wno-enum-compare -Wno-enum-conversion -Wno-unused-but-set-variable \
            -Wno-unused-value \
-           -I$(INCDIR) -D_ARM_ -D_NTSYSTEM_
+           -MMD -MP \
+           -I$(INCDIR) -D_ARM_ -D_NTSYSTEM_ -DRAMDISK_INITRAMFS=$(RAMDISK_INITRAMFS)
 # Link base. 0x8000 is the Raspberry Pi firmware's native 32-bit kernel load
 # address; QEMU honors it via the ELF LMA (the raw .bin is for SD boot). Override
 # with `make TEXT_BASE=0x00010000` to reproduce the earlier QEMU raw -kernel layout.
@@ -49,10 +56,15 @@ ARM_OBJS    := $(OBJDIR)/start.o $(OBJDIR)/uart.o $(OBJDIR)/main.o \
                $(OBJDIR)/fsstub.o $(OBJDIR)/stubs.o $(OBJDIR)/init.o \
                $(OBJDIR)/mailbox.o $(OBJDIR)/fb.o $(OBJDIR)/fbcon.o \
                $(OBJDIR)/console.o $(OBJDIR)/usb.o $(OBJDIR)/timer.o \
-               $(OBJDIR)/arcdos_rt.o
+               $(OBJDIR)/arcdos_rt.o $(OBJDIR)/ramdisk.o
 PORTED_OBJS := $(OBJDIR)/osloader.o $(OBJDIR)/blmisc.o $(OBJDIR)/blmemory.o \
-               $(OBJDIR)/blio.o $(OBJDIR)/arcdos.o
+               $(OBJDIR)/blio.o $(OBJDIR)/fatboot.o $(OBJDIR)/arcdos.o
 OBJS        := $(ARM_OBJS) $(PORTED_OBJS) $(OBJDIR)/payload_blob.o
+# Embed the FAT image blob only for the QEMU build; the initramfs build serves the
+# firmware-staged image from RAM, so the ~6 MiB blob is omitted and loader.bin is tiny.
+ifeq ($(RAMDISK_INITRAMFS),0)
+OBJS        += $(OBJDIR)/ramdisk_blob.o
+endif
 
 # arcdos.c is written against the ADK ARC API (plain Open/Read/Print, ADK arc.h
 # names) which collide with the loader's NT headers. Compile it in isolation: the
@@ -63,10 +75,29 @@ ARCDOS_CFLAGS := -mcpu=cortex-a7 -marm -mfloat-abi=soft -ffreestanding -fno-pic 
                  -fno-unwind-tables -fno-asynchronous-unwind-tables -O2 -Wall \
                  -Wno-unused-parameter -Wno-unused-variable \
                  -Wno-unused-but-set-variable -Wno-parentheses -Wno-pointer-sign \
-                 -I../loader/arcdos-inc -D_ARM_
+                 -MMD -MP -I../loader/arcdos-inc -D_ARM_
 $(OBJDIR)/arcdos.o: CFLAGS := $(ARCDOS_CFLAGS)
 
 all: $(OBJDIR)/loader.bin
+
+# Rebuild every object when RAMDISK_INITRAMFS flips. -MMD -MP tracks header includes but
+# NOT -D flags, so switching the gate (e.g. `./build.sh` then `./build.sh RAMDISK_INITRAMFS=1`)
+# without a clean would otherwise link .o files compiled under the old gate. The stamp's
+# filename encodes the flag value; a different value names a file that does not exist, whose
+# rule deletes the stale stamp and touches the new one, invalidating all objects. Defined
+# AFTER `all:` so `all` stays the default goal (this target contains a slash, so make's
+# leading-`.` default-goal exclusion would not protect it).
+RAMDISK_STAMP := $(OBJDIR)/.ramdisk_initramfs_$(RAMDISK_INITRAMFS)
+$(RAMDISK_STAMP):
+	@rm -f $(OBJDIR)/.ramdisk_initramfs_*; touch $@
+$(OBJS): $(RAMDISK_STAMP)
+
+# Header dependency tracking. -MMD -MP (in CFLAGS above) emits a .d per object listing
+# every header it includes, so editing a shared shim header (ntdef.h, bldr.h, fsboot.h,
+# fatboot.h, ...) rebuilds the objects that include it. Without this, an object compiled
+# against an old header layout stays stale and silently corrupts memory. Empty on a
+# fresh tree (the wildcard matches nothing), which is correct - everything builds anyway.
+-include $(wildcard $(OBJDIR)/*.d)
 
 $(OBJDIR)/%.o: $(ARMDIR)/%.S
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -95,6 +126,17 @@ $(OBJDIR)/payload.bin: $(OBJDIR)/payload.elf
 $(OBJDIR)/payload_blob.o: $(OBJDIR)/payload.bin
 	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf32-littlearm -B arm payload.bin payload_blob.o
 
+# --- RAM-disk image (the Arc block device under QEMU) ---
+# obj/ramdisk.img is built OUT OF BAND by loader/ramdisk/make-ramdisk.sh (it needs
+# mkfs.vfat/mtools, which the arc-rpi-build image lacks). The Makefile only wraps
+# the prebuilt image into a linkable blob (_binary_ramdisk_img_{start,end,size}),
+# run in $(OBJDIR) so no absolute path is baked into the symbol names.
+$(OBJDIR)/ramdisk.img:
+	@echo "ERROR: $@ is missing - build it first: (cd ../loader/ramdisk && ./make-ramdisk.sh)" >&2; exit 1
+
+$(OBJDIR)/ramdisk_blob.o: $(OBJDIR)/ramdisk.img
+	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf32-littlearm -B arm ramdisk.img ramdisk_blob.o
+
 $(OBJDIR)/loader.elf: $(OBJS) loader.ld
 	$(CC) $(CFLAGS) $(LDFLAGS) $(OBJS) -o $@
 
@@ -102,4 +144,4 @@ $(OBJDIR)/loader.bin: $(OBJDIR)/loader.elf
 	$(OBJCOPY) -O binary $< $@
 
 clean:
-	rm -f $(OBJDIR)/*.o $(OBJDIR)/*.elf $(OBJDIR)/*.bin
+	rm -f $(OBJDIR)/*.o $(OBJDIR)/*.elf $(OBJDIR)/*.bin $(OBJDIR)/*.d $(OBJDIR)/.ramdisk_initramfs_*

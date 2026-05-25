@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the stand-in NT kernel and wrap it as a PE the OS loader can load.
+# Build the NT kernel and wrap it as a PE the OS loader can load.
 #
 # Output: arcfw/ramdisk/root/OS/NTOSKRNL.EXE - a real PE32 (machine 0x1c0, ARM).
 # Run this BEFORE make-ramdisk.sh so the PE is packaged into the FAT image the
@@ -18,7 +18,7 @@ cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ARM32ROOT="$(cd ../.. && pwd)"
 IMAGE="${IMAGE:-arc-rpi-build:latest}"
 
-echo ">> building stand-in kernel + wrapping as NTOSKRNL.EXE (Docker: $IMAGE)"
+echo ">> building kernel + wrapping as NTOSKRNL.EXE (Docker: $IMAGE)"
 docker run --rm -v "$ARM32ROOT":/work -w /work/arcfw/kernel "$IMAGE" bash -c '
 set -e
 CROSS=arm-linux-gnueabihf-
@@ -56,9 +56,9 @@ mkdir -p /work/arcfw/ramdisk/root/WINNT/System32
 python3 mkpe.py "$OUT/kernel.bin" /work/arcfw/ramdisk/root/WINNT/System32/NTOSKRNL.EXE \
         --image-base 0x01000000 --section-rva 0x1000 --entry "$entry" --machine 0x1c0
 
-# Minimal stand-in HAL.DLL. The genuine BlOsLoader (boot menu [3]) loads hal.dll from
-# the osloader directory (\WINNT\System32) right after the kernel. Our stand-in kernel
-# imports nothing from the HAL and never calls it, so this only needs to be a valid ARM
+# Minimal HAL.DLL. BlOsLoader loads hal.dll from the osloader directory (\WINNT\System32)
+# right after the kernel. The kernel imports nothing from the HAL and never calls it
+# (the HAL display code is compiled into the kernel), so this only needs to be a valid ARM
 # PE (machine 0x1c0) that BlLoadImage can map at a base that does not collide with the
 # kernel (0x01000000) - loaded at 0x01100000. Content is a single "bx lr" (never run).
 printf "\x1e\xff\x2f\xe1" > "$OUT/hal.bin"   # ARM bx lr (e12fff1e)

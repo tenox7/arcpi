@@ -636,6 +636,15 @@ AEGetEnvironmentVariable(
 // arcdos path (which never calls BlIoInitialize) cannot allocate them to a file; the
 // BlOsLoader path re-establishes them when it opens the console after BlIoInitialize.
 //
+// The ARC configuration tree is synthesized + served by arcfw/arm/config.c (the
+// x86 ARCEMUL FwConfigurationTree analog); these back the config-tree vector slots.
+extern VOID BlArmInitializeArcConfigTree(VOID);
+extern PCONFIGURATION_COMPONENT AEGetChild(IN PCONFIGURATION_COMPONENT Current);
+extern PCONFIGURATION_COMPONENT AEGetPeer(IN PCONFIGURATION_COMPONENT Current);
+extern PCONFIGURATION_COMPONENT AEGetParent(IN PCONFIGURATION_COMPONENT Current);
+extern ARC_STATUS AEGetConfigurationData(IN PVOID ConfigurationData,
+                                         IN PCONFIGURATION_COMPONENT Current);
+
 VOID
 BlArmInitializeArcEmulator(
     VOID
@@ -661,9 +670,15 @@ BlArmInitializeArcEmulator(
     GlobalFirmwareVectors[RebootRoutine]     = (PVOID)AEReboot;
     GlobalFirmwareVectors[GetDisplayStatusRoutine] = (PVOID)AEGetDisplayStatus;
     GlobalFirmwareVectors[GetEnvironmentRoutine]   = (PVOID)AEGetEnvironmentVariable;
+    GlobalFirmwareVectors[GetChildRoutine]  = (PVOID)AEGetChild;
+    GlobalFirmwareVectors[GetPeerRoutine]   = (PVOID)AEGetPeer;
+    GlobalFirmwareVectors[GetParentRoutine] = (PVOID)AEGetParent;
+    GlobalFirmwareVectors[GetDataRoutine]   = (PVOID)AEGetConfigurationData;
 
     BlFileTable[ARC_CONSOLE_INPUT].Flags.Open = 1;
     BlFileTable[ARC_CONSOLE_INPUT].Flags.Read = 1;
     BlFileTable[ARC_CONSOLE_OUTPUT].Flags.Open = 1;
     BlFileTable[ARC_CONSOLE_OUTPUT].Flags.Write = 1;
+
+    BlArmInitializeArcConfigTree();
 }

@@ -147,10 +147,15 @@ int vsprintf(char *buf, const char *fmt, va_list ap)
         if (*fmt != '%') { *out++ = *fmt; continue; }
         fmt++;
 
-        int zero = 0, width = 0, longf = 0;
+        int zero = 0, width = 0, longf = 0, wide = 0;
         if (*fmt == '0') { zero = 1; fmt++; }
         while (*fmt >= '0' && *fmt <= '9') { width = width * 10 + (*fmt - '0'); fmt++; }
-        while (*fmt == 'l' || *fmt == 'h') { if (*fmt == 'l') longf = 1; fmt++; }
+        // length/width prefixes: l (long), h (short), w (wide - NT: %wZ/%ws/%wc).
+        while (*fmt == 'l' || *fmt == 'h' || *fmt == 'w') {
+            if (*fmt == 'l') longf = 1;
+            if (*fmt == 'w') wide = 1;
+            fmt++;
+        }
 
         char numbuf[32];
         char *np;
@@ -162,9 +167,32 @@ int vsprintf(char *buf, const char *fmt, va_list ap)
         case '%': *out++ = '%'; break;
         case 'c': *out++ = (char)va_arg(ap, int); break;
         case 's': {
+            if (wide) {                                  // %ws - PWSTR (wide C string)
+                const WCHAR *ws = va_arg(ap, const WCHAR *);
+                if (ws == NULL) { const char *s = "(null)"; while (*s) *out++ = *s++; break; }
+                while (*ws) *out++ = (char)*ws++;         // low-byte ASCII
+                break;
+            }
             const char *s = va_arg(ap, const char *);
             if (s == NULL) s = "(null)";
             while (*s) *out++ = *s++;
+            break;
+        }
+        case 'Z': {
+            // NT counted string: %wZ = PUNICODE_STRING (wide), %Z = PSTRING/PANSI_STRING.
+            // Both have the same {USHORT Length; USHORT MaximumLength; PVOID Buffer;} layout;
+            // Length is in BYTES. Registry/NLS names are ASCII, so emit the low byte.
+            PUNICODE_STRING u = va_arg(ap, PUNICODE_STRING);
+            if (u != NULL && u->Buffer != NULL) {
+                unsigned i;
+                if (wide) {
+                    unsigned n = u->Length / sizeof(WCHAR);
+                    for (i = 0; i < n; i++) *out++ = (char)u->Buffer[i];
+                } else {
+                    const char *b = (const char *)u->Buffer;
+                    for (i = 0; i < u->Length; i++) *out++ = b[i];
+                }
+            }
             break;
         }
         case 'd':

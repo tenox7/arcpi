@@ -1,5 +1,5 @@
-@ Entry stub for the handoff-test payload (a minimal serial shell - the kernel
-@ stand-in; see shell.c and ARCHITECTURE.md).
+@ Entry stub for the handoff-test payload (a minimal serial shell;
+@ see shell.c and ARCHITECTURE.md).
 @
 @ The loader copies the payload blob to its link/load base (build/payload.ld,
 @ which MUST match PAYLOAD_LOAD_BASE in arcfw/arm/init.c) and jumps here in ARM

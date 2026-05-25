@@ -4,19 +4,18 @@
 // (osloader.c:779 BlSetupForNt). Replaces the stubs.c placeholder.
 //
 // The MIPS/Alpha versions build kernel page tables and allocate the idle thread's
-// kernel stack, panic stack, PCR, and PDR pages. Our stand-in kernel runs MMU-off
-// (no page tables yet - KSEG0_BASE == 0, bldr.h) and only a "hello world" kernel,
-// so the one thing it genuinely needs is a stack: KE/MIPS/X4START.S loads sp from
-// LoaderBlock->KernelStack, and so does our start.S. We allocate that and nothing
-// more; PCR/PDR/panic-stack/page-tables arrive with a real kernel.
+// kernel stack, panic stack, PCR, and PDR pages. The kernel runs MMU-off (no page
+// tables yet - KSEG0_BASE == 0, bldr.h) and the one thing it needs is a stack:
+// KE/MIPS/X4START.S loads sp from LoaderBlock->KernelStack, and so does our start.S.
+// We allocate that; PCR/PDR/panic-stack/page-tables follow as the kernel grows.
 //
 #include "bldr.h"
 
 //
 // The kernel's HAL console (arcfw/kernel/jxdisp.c) needs the OEM font + the VideoCore
-// framebuffer geometry via the loader block. Set here (in the shared arch setup) so BOTH
-// boot paths get it: the [1] BlArmBootKernel shortcut AND the genuine BlOsLoader ([3]),
-// which calls BlSetupForNt at osloader.c:779 but has no notion of our ARM framebuffer.
+// framebuffer geometry via the loader block. Set here (in the shared arch setup) so the
+// boot paths get it: BlOsLoader (and BlArmBootKernel) call BlSetupForNt at osloader.c:779,
+// which has no notion of our ARM framebuffer.
 //
 extern unsigned int *fb_base;
 extern unsigned int fb_width, fb_height, fb_pitch, fb_order;
@@ -24,8 +23,7 @@ extern unsigned char _binary_font_fon_start[];
 
 //
 // Idle-thread kernel stack size. MIPS/Alpha use KERNEL_STACK_SIZE from the kernel
-// headers (not in our shim set); 16 KiB (4 pages) matches their order of magnitude
-// and is ample for the stand-in kernel.
+// headers (not in our shim set); 16 KiB (4 pages) matches their order of magnitude.
 //
 #define KERNEL_STACK_SIZE 0x4000
 
@@ -62,7 +60,13 @@ BlSetupForNt(
     // fields). jxdisp.c's HalpInitializeDisplay0 reads these; without them it falls back
     // to serial-only.
     //
-    LoaderBlock->OemFontFile = (PVOID)_binary_font_fon_start;
+    // PREFER the OEM HAL font the OS Loader already loaded (BlLoadOemHalFont -> vgaoem.fon,
+    // set into OemFontFile) - the RISC/Jazz contract. Fall back to the embedded font only
+    // when none was loaded (a boot path that skips the hive/NLS/font load leaves it NULL).
+    //
+    if (LoaderBlock->OemFontFile == NULL) {
+        LoaderBlock->OemFontFile = (PVOID)_binary_font_fon_start;
+    }
     LoaderBlock->u.Arm.FrameBuffer = (ULONG)(unsigned long)fb_base;
     LoaderBlock->u.Arm.FrameBufferWidth = fb_width;
     LoaderBlock->u.Arm.FrameBufferHeight = fb_height;

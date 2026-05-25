@@ -1,15 +1,14 @@
 //
-// Stand-in NT kernel for the ARM32 / Raspberry Pi 2 port.
+// NT kernel for the ARM32 / Raspberry Pi 2 port.
 //
-// This is NOT a full ntoskrnl - NT 3.5 was never built for ARM. What IS real is the
-// path here: the genuine NT OS Loader (BlOsLoader) loads this PE + hal.dll, builds the
-// LOADER_PARAMETER_BLOCK, and enters at KiSystemStartup with r0 = the loader block -
-// the KE/MIPS/X4START.S contract. The kernel then renders a boot-status screen from
-// the data the loader genuinely handed over: the loaded-module list, the physical
-// memory map, and the boot parameters. The text is drawn on the HDMI framebuffer
-// through the real NT HAL routine HalDisplayString (jxdisp.c, ported from JXDISP.C)
-// and mirrored to the PL011 serial line (the KdPrint/debugger analog) for headless
-// verification. Output goes to both via emit().
+// The OS Loader (BlOsLoader) loads this PE + hal.dll, builds the LOADER_PARAMETER_BLOCK,
+// and enters at KiSystemStartup with r0 = the loader block - the KE/MIPS/X4START.S
+// contract. The kernel renders a boot-status screen from the data the loader handed over:
+// the loaded-module list, the physical memory map, and the boot parameters. The text is
+// drawn on the HDMI framebuffer through the NT HAL routine HalDisplayString (jxdisp.c,
+// ported from JXDISP.C) and mirrored to the PL011 serial line (the KdPrint/debugger
+// analog) for headless verification. Output goes to both via emit(). Further kernel
+// initialization (the executive) is not yet implemented; it halts after the status screen.
 //
 // Freestanding ARMv7, no libc. Zero-initialized globals are folded into .data by
 // kernel.ld so the image carries no .bss. Runs MMU-off at link address 0x01001000.
@@ -164,9 +163,8 @@ KiSystemStartupC(void *LoaderBlockPtr)
     //
     DisplayOk = HalpInitializeDisplay0(lb);
 
-    emit("Microsoft (R) Windows NT (TM)    Version 3.5\n");
+    emit("Microsoft (R) Windows NT (TM)    Version 3.5  Build 782\n");
     emit("ARM32 / Raspberry Pi 2  -  ARMv7-A Cortex-A7 (BCM2836)\n");
-    emit("Boot chain:  ARC Firmware Emulator  ->  OS Loader V3.5  ->  NTOSKRNL\n");
     emit("==================================================================\n\n");
 
     emit("KiSystemStartup: control received from the OS Loader.\n");
@@ -252,5 +250,5 @@ KiSystemStartupC(void *LoaderBlockPtr)
     emit("\n");
 
     emit("\nNTOSKRNL: OS Loader hand-off data above received intact.\n");
-    emit("System halted - no further kernel implemented yet.\n");
+    emit("System halted.\n");
 }

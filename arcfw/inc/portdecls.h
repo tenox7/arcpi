@@ -13,6 +13,8 @@
 // From PRIVATE/NTOS/INC/HAL.H and BOOT/DETECT/I386/DISK.H.
 //
 #define PARTITION_TABLE_OFFSET (0x1be / 2)
+#define BOOT_SIGNATURE_OFFSET  ((0x200 / 2) - 1)
+#define BOOT_RECORD_SIGNATURE  (0xaa55)
 
 //
 // ntrtl.h. RtlConvertUlongToLargeInteger is inline x86 _asm in the original,

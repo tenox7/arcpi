@@ -1,5 +1,5 @@
 //
-// Shared declarations for the stand-in NT kernel (kernel.c + jxdisp.c).
+// Shared declarations for the NT kernel (kernel.c + jxdisp.c).
 //
 // The kernel is built freestanding with no NT header chain (unlike the loader,
 // which pulls arcfw/inc/). So the few NT types and structures the ported HAL

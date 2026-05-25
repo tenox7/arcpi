@@ -25,16 +25,17 @@ Revision History:
 #include "string.h"
 #include "msg.h"
 
-//
-// ARM port: this build loads the stand-in kernel (arcfw/kernel/), which is NOT a real
-// ntoskrnl - it consumes only the loader block, its memory map, the kernel stack, and
-// the OEM font + framebuffer. It reads NEITHER the registry SYSTEM hive NOR NLS data.
-// So with STAND_IN_KERNEL set we skip BlLoadAndScanSystemHive (a valid minimal SYSTEM
-// hive + NLS files are substantial and would only be ignored). Set to 0 for a future
-// real-kernel build to do the genuine hive/NLS load. The contract proven here is the
-// real BlOsLoader load + handoff path, not faithful registry/NLS init.
-//
-#define STAND_IN_KERNEL 1
+// BlLoadAndScanSystemHive runs the RISC boot path: load + validate the SYSTEM hive (the
+// boot Configuration Manager in arcfw/ported/config/), compute the boot driver list
+// (BlScanRegistry), and load the NLS data + OEM HAL font the hive names (BlLoadNLSData /
+// BlLoadOemHalFont). It uses NT's all-purpose SYSTEM hive (PUBLIC/OAK/BIN/SYSTEM) + the
+// NLS files + vgaoem.fon. Set LOAD_SYSTEM_HIVE 0 to skip the hive/NLS load.
+#define LOAD_SYSTEM_HIVE 1
+
+// Boot drivers stay deferred: no ARM driver images exist yet. BlScanRegistry still COMPUTES
+// the boot driver list into BlLoaderBlock->BootDriverListHead; BlLoadBootDrivers (which loads
+// the .sys images) is gated off in BlLoadAndScanSystemHive below. Set 1 once ARM drivers exist.
+#define LOAD_BOOT_DRIVERS 0
 
 
 
@@ -702,19 +703,24 @@ Return Value:
     // "Cannot load system hardware configuration file.\r\n"
 
 
-#if STAND_IN_KERNEL
+#if LOAD_SYSTEM_HIVE
     //
-    // Skip the SYSTEM hive + NLS load (see STAND_IN_KERNEL note at the top). The stand-in
-    // kernel reads neither; NlsData stays allocated-but-empty and RegistryBase NULL.
+    // Load + validate the SYSTEM hive, compute the boot driver list, and load the NLS data
+    // + OEM HAL font it names. BlLoadBootDrivers (the driver-image load) is gated off inside
+    // (LOAD_BOOT_DRIVERS - no ARM driver images yet). See osloader.c top.
     //
-    Status = ESUCCESS;
-#else
     Status = BlLoadAndScanSystemHive(LoadDeviceId,
                                      LoadDevice,
                                      LoadFileName,
                                      BootFileSystem,
                                      UseLastKnownGood,
                                      BadFileName);
+#else
+    //
+    // Hive/NLS load disabled (LOAD_SYSTEM_HIVE 0): NlsData stays allocated-but-empty and
+    // RegistryBase NULL.
+    //
+    Status = ESUCCESS;
 #endif
 
     // warning message ?
@@ -1029,6 +1035,7 @@ oktoskipfont:
     //
     strcpy(Directory,DirectoryPath);
     strcat(Directory,"\\");
+#if LOAD_BOOT_DRIVERS
     Status = BlLoadBootDrivers(DeviceId,
                                DeviceName,
                                Directory,
@@ -1038,6 +1045,15 @@ oktoskipfont:
     if (Status == ESUCCESS) {
         return(Status);
     }
+#else
+    //
+    // ARM (LOAD_BOOT_DRIVERS 0): no ARM driver images exist yet. BlScanRegistry above has
+    // already COMPUTED the boot driver list into BlLoaderBlock->BootDriverListHead (the
+    // loader block carries it for the kernel); we just don't load the .sys images. The hive,
+    // NLS data and OEM HAL font ARE loaded for real. Succeed so the handoff proceeds.
+    //
+    return ESUCCESS;
+#endif
 
 HiveScanFailed:
     return(Status);

@@ -23,6 +23,7 @@ Revision History:
 
 #include "ntos.h"
 #include "arccodes.h"
+#include "halfont.h"    // ARM port: OEM_FONT_FILE_HEADER for BlLoadOemHalFont (blload.c)
 
 
 //
@@ -67,6 +68,11 @@ Revision History:
 #define KSEG0_BASE 0
 #define PAGE_SHIFT 12
 #define PAGE_SIZE  (1 << PAGE_SHIFT)
+
+// mm.h: round a byte count up to a whole number of pages (blload.c uses it).
+#ifndef ROUND_TO_PAGES
+#define ROUND_TO_PAGES(SIZE) (((ULONG)(SIZE) + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1))
+#endif
 
 #endif
 

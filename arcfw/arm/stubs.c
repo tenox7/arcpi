@@ -19,38 +19,18 @@
 // it had to become real for BlOsLoader to get past its first line.
 //
 
-// Stubbed to ESUCCESS, not ported: BlConfigurationInitialize builds the ARC
-// configuration tree (BLCONFIG.C, 904 lines). osloader.c sets
-// BlLoaderBlock->ConfigurationRoot = NULL right before calling it and never
-// reads ConfigurationRoot again on the path to loading the kernel (the only
-// readers are the KeFindConfigurationEntry cache lookups, also stubbed to NULL,
-// which fall through to defaults). So a no-op success is safe for now.
-ARC_STATUS BlConfigurationInitialize(PCONFIGURATION_COMPONENT Parent,
-                                     PCONFIGURATION_COMPONENT_DATA ParentEntry)
-{
-    return ESUCCESS;
-}
+// BlConfigurationInitialize is no longer stubbed - ported real in
+// arcfw/ported/blconfig.c. It walks the firmware config tree (synthesized by
+// arcfw/arm/config.c and served via the GetChild/GetPeer/GetParent/GetData vector
+// slots) and copies it into BlLoaderBlock->ConfigurationRoot.
 
-ARC_STATUS BlInitResources(PCHAR StartCommand)
-{
-    STUB("BlInitResources");
-    return ENODEV;
-}
+// BlInitResources + BlFindMessage are no longer stubbed - implemented in
+// arcfw/arm/blsvc.c (BlInitResources returns ESUCCESS; BlFindMessage maps the msg.h
+// IDs to text so BlFatalError reports a readable cause). No PE .rsrc / mc.exe here.
 
-PCHAR BlFindMessage(ULONG Id)
-{
-    STUB("BlFindMessage");
-    return NULL;
-}
-
-PCONFIGURATION_COMPONENT_DATA KeFindConfigurationEntry(PCONFIGURATION_COMPONENT_DATA Child,
-                                                       CONFIGURATION_CLASS Class,
-                                                       CONFIGURATION_TYPE Type,
-                                                       PULONG Key)
-{
-    STUB("KeFindConfigurationEntry");
-    return NULL;
-}
+// KeFindConfigurationEntry is no longer stubbed - ported real (with
+// KeFindConfigurationNextEntry) from KE/CONFIG.C in arcfw/ported/keconfig.c; it
+// searches the now-real ConfigurationRoot tree and is NULL-root-safe.
 
 // ---- memory / heap ----
 //
@@ -74,44 +54,21 @@ PCONFIGURATION_COMPONENT_DATA KeFindConfigurationEntry(PCONFIGURATION_COMPONENT_
 // RtlImageDirectoryEntryToData + the LdrRelocateImage guard are in
 // arcfw/arm/imageldr.c. BlAllocateDataTableEntry / BlScanImportDescriptorTable are
 // no longer stubbed either - ported real in arcfw/ported/blbind.c (verbatim NT
-// BLBIND.C), so the genuine BlOsLoader path ([3]) builds the loaded-module list and
-// resolves imports. (The trimmed kernel handoff [1] still doesn't need them.)
+// BLBIND.C), so the BlOsLoader path builds the loaded-module list and resolves imports.
 //
 
 // RtlImageNtHeader is no longer stubbed - real in arcfw/arm/imageldr.c.
 
 // ---- registry / NLS / drivers ----
 
-ARC_STATUS BlLoadAndInitSystemHive(ULONG DeviceId, PCHAR DeviceName, PCHAR DirectoryPath,
-                                   PCHAR HiveName, BOOLEAN IsAlternate)
-{
-    STUB("BlLoadAndInitSystemHive");
-    return ENODEV;
-}
+// BlLoadAndInitSystemHive + BlScanRegistry are no longer stubbed - ported real (the
+// hive subset of REGBOOT.C) in arcfw/ported/regboot.c, backed by NT's boot CM engine
+// (the 13 bconfig.lib files in arcfw/ported/config/). Tier B: load + validate + scan
+// the real SYSTEM hive into a boot driver list.
 
-PCHAR BlScanRegistry(BOOLEAN UseLastKnownGood, PWSTR BootFileSystemPath,
-                     PLIST_ENTRY BootDriverListHead, PUNICODE_STRING AnsiCodepage,
-                     PUNICODE_STRING OemCodepage, PUNICODE_STRING LanguageTable,
-                     PUNICODE_STRING OemHalFont)
-{
-    STUB("BlScanRegistry");
-    return "boot-loader registry scan not implemented";
-}
-
-ARC_STATUS BlLoadNLSData(ULONG DeviceId, PCHAR DeviceName, PCHAR DirectoryPath,
-                         PUNICODE_STRING AnsiCodepage, PUNICODE_STRING OemCodepage,
-                         PUNICODE_STRING LanguageTable, PCHAR BadFileName)
-{
-    STUB("BlLoadNLSData");
-    return ENODEV;
-}
-
-ARC_STATUS BlLoadOemHalFont(ULONG DeviceId, PCHAR DeviceName, PCHAR DirectoryPath,
-                            PUNICODE_STRING OemHalFont, PCHAR BadFileName)
-{
-    STUB("BlLoadOemHalFont");
-    return ENODEV;
-}
+// BlLoadNLSData + BlLoadOemHalFont are no longer stubbed - ported real (verbatim
+// BLLOAD.C) in arcfw/ported/blload.c. They run only when the hive-scan path is taken
+// to completion (Tier C); the Tier-B path stops after the registry scan.
 
 ARC_STATUS BlLoadBootDrivers(ULONG DeviceId, PCHAR LoadDevice, PCHAR SystemPath,
                              PLIST_ENTRY BootDriverListHead, PCHAR BadFileName)
@@ -122,43 +79,20 @@ ARC_STATUS BlLoadBootDrivers(ULONG DeviceId, PCHAR LoadDevice, PCHAR SystemPath,
 
 // ---- device names / disk info / break-in / setup ----
 
-// Stand-in: the real BlGenerateDeviceNames builds the ARC<->NT device-name mapping that
-// osloader.c stores in ArcBootDeviceName/ArcHalDeviceName/NtBootPathName. We have no NT
-// device tree, so echo the ARC device name into the canonical output (gives the kernel's
-// boot screen a real device name) and leave the NT prefix empty; return ESUCCESS (an
-// error would fail the load just before BlSetupForNt). osloader.c strlen/strcpy's both.
-ARC_STATUS BlGenerateDeviceNames(PCHAR ArcDeviceName, PCHAR ArcCanonicalName,
-                                 PCHAR NtDevicePrefix)
-{
-    if (ArcCanonicalName) {
-        ULONG i = 0;
-        if (ArcDeviceName)
-            for (; ArcDeviceName[i]; i += 1)
-                ArcCanonicalName[i] = ArcDeviceName[i];
-        ArcCanonicalName[i] = '\0';
-    }
-    if (NtDevicePrefix)
-        NtDevicePrefix[0] = '\0';
-    return ESUCCESS;
-}
+// BlGenerateDeviceNames is no longer stubbed - ported real (the verbatim ARC-name
+// parsing slice of BLCONFIG.C) in arcfw/ported/blconfig.c. It validates + canonicalizes
+// the ARC device name and emits the NT prefix (\Device\Harddisk etc.); osloader.c stores
+// the canonical name as ArcBootDeviceName/ArcHalDeviceName.
 
-ARC_STATUS BlGetArcDiskInformation(VOID)
-{
-    STUB("BlGetArcDiskInformation");
-    return ENODEV;
-}
+// BlGetArcDiskInformation is no longer stubbed - ported real (verbatim ARCDISK.C)
+// in arcfw/ported/arcdisk.c; it finds the ramdisk via the config tree and records
+// its MBR signature in BlLoaderBlock->ArcDiskInformation.
 
-BOOLEAN BlCheckBreakInKey(VOID)
-{
-    STUB("BlCheckBreakInKey");
-    return FALSE;
-}
+// BlCheckBreakInKey is no longer stubbed - implemented in arcfw/arm/blsvc.c (polls the
+// console for a pending key, consumes it, and returns FALSE = no boot break-in).
 
-BOOLEAN BlLastKnownGoodPrompt(PBOOLEAN UseLastKnownGood)
-{
-    STUB("BlLastKnownGoodPrompt");
-    return TRUE;
-}
+// BlLastKnownGoodPrompt is no longer stubbed - provided (as a no-LKG stub) in
+// arcfw/ported/regboot.c, where BlScanRegistry's lone call site lives.
 
 // BlSetupForNt is no longer stubbed - real (minimal) in arcfw/arm/ntsetup.c (the
 // ARM analog of BOOT/LIB/MIPS/NTSETUP.C): it allocates the kernel stack the kernel

@@ -57,11 +57,22 @@ ARM_OBJS    := $(OBJDIR)/start.o $(OBJDIR)/uart.o $(OBJDIR)/main.o \
                $(OBJDIR)/mailbox.o $(OBJDIR)/fb.o $(OBJDIR)/fbcon.o \
                $(OBJDIR)/console.o $(OBJDIR)/usb.o $(OBJDIR)/timer.o \
                $(OBJDIR)/arcdos_rt.o $(OBJDIR)/ramdisk.o \
-               $(OBJDIR)/imageldr.o $(OBJDIR)/ntsetup.o
+               $(OBJDIR)/imageldr.o $(OBJDIR)/ntsetup.o $(OBJDIR)/config.o \
+               $(OBJDIR)/blsvc.o $(OBJDIR)/ntrtlcm.o
 PORTED_OBJS := $(OBJDIR)/osloader.o $(OBJDIR)/blmisc.o $(OBJDIR)/blmemory.o \
                $(OBJDIR)/blio.o $(OBJDIR)/fatboot.o $(OBJDIR)/arcdos.o \
-               $(OBJDIR)/peldr.o $(OBJDIR)/blbind.o
-OBJS        := $(ARM_OBJS) $(PORTED_OBJS) $(OBJDIR)/payload_blob.o $(OBJDIR)/font_blob.o
+               $(OBJDIR)/peldr.o $(OBJDIR)/blbind.o $(OBJDIR)/blconfig.o \
+               $(OBJDIR)/arcdisk.o $(OBJDIR)/keconfig.o \
+               $(OBJDIR)/regboot.o $(OBJDIR)/blload.o
+# Boot-time Configuration Manager (NT's bconfig.lib: read-only hive engine +
+# boot driver-list scan). 13 files ported verbatim from PRIVATE/NTOS/CONFIG into
+# arcfw/ported/config/. Drives Tier B (load + scan the real SYSTEM hive).
+CONFIG_OBJS := $(OBJDIR)/cmboot.o $(OBJDIR)/cmchek.o $(OBJDIR)/cmdat.o \
+               $(OBJDIR)/cmdat2.o $(OBJDIR)/cmindex.o $(OBJDIR)/cmname.o \
+               $(OBJDIR)/cmtree.o $(OBJDIR)/hivebin.o $(OBJDIR)/hivecell.o \
+               $(OBJDIR)/hivechek.o $(OBJDIR)/hiveinit.o $(OBJDIR)/hivesum.o \
+               $(OBJDIR)/hivemap.o
+OBJS        := $(ARM_OBJS) $(PORTED_OBJS) $(CONFIG_OBJS) $(OBJDIR)/payload_blob.o $(OBJDIR)/font_blob.o
 # Embed the FAT image blob only for the QEMU build; the initramfs build serves the
 # firmware-staged image from RAM, so the ~6 MiB blob is omitted and arcfw.bin is tiny.
 ifeq ($(RAMDISK_INITRAMFS),0)
@@ -108,6 +119,9 @@ $(OBJDIR)/%.o: $(ARMDIR)/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(OBJDIR)/%.o: $(PORTEDDIR)/%.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(OBJDIR)/%.o: $(PORTEDDIR)/config/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # --- handoff-test payload (serial shell) ---

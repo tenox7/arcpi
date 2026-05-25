@@ -1607,7 +1607,7 @@ typedef struct _ALPHA_LOADER_BLOCK {
 //
 // ARM port (not in the original NT 3.5 arc.h). The MIPS/Alpha blocks carry the
 // arch state their kernels need at entry (GpBase, PCR/PDR pages, page-table
-// pointers). The stand-in ARM kernel runs MMU-off and needs none of that yet.
+// pointers). The ARM kernel runs MMU-off and needs none of that yet.
 //
 // The framebuffer fields are how the OS loader hands the kernel its console
 // display. On MIPS/Alpha the kernel's HAL re-derives the video geometry by walking

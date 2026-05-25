@@ -1,5 +1,5 @@
 //
-// Minimal serial shell - the handoff-test payload and stand-in for the kernel.
+// Minimal serial shell - the handoff-test payload.
 //
 // Freestanding ARMv7, no libc, its own PL011 I/O. Loaded into RAM by the NT ARC
 // loader and entered via start.S. Its banner proves the loader -> loaded-code
@@ -156,7 +156,7 @@ void shell_main(void)
     // UARTEN|TXE|RXE via OR (leaving any reset bits intact - never clears TX).
     UART_CR |= CR_UARTEN | CR_TXE | CR_RXE;
 
-    uart_puts("\n*** ARM payload shell ***  (loaded by the NT ARC loader; kernel stand-in)\n");
+    uart_puts("\n*** ARM payload shell ***  (loaded by the NT ARC loader)\n");
     uart_puts("commands: help  peek <hex>  poke <hex> <hex>  dump <hex> [n]  reboot\n");
 
     for (;;) {

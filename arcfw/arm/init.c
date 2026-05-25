@@ -64,17 +64,16 @@ static PCHAR BlArmArgv[] = {
     "systempartition=multi(0)disk(0)rdisk(0)partition(1)",
     "osloadfilename=\\WINNT",
     "osloadpartition=multi(0)disk(0)rdisk(0)partition(1)",
-    "osloadoptions=SOS",        // genuine NT /SOS: print each file as BlOsLoader loads it (bring-up diagnostic)
+    "osloadoptions=SOS",        // NT /SOS: print each file as BlOsLoader loads it
     "consolein=multi(0)serial(0)",
     "consoleout=multi(0)serial(0)"
 };
 
 //
-// Handoff smoke test. The loader's endgame is to load code and jump to it. No NT
-// ARM kernel exists, so this copies an embedded stand-in payload (a minimal serial
-// shell, arcfw/payload/) to a fixed RAM address and transfers control - proving
-// the mechanism independently of the filesystem. Set SMOKE_HANDOFF to 0 to restore
-// the normal BlOsLoader path. See ARCHITECTURE.md for the rationale.
+// Handoff test. The loader's endgame is to load code and jump to it. This copies an
+// embedded serial-shell payload (arcfw/payload/) to a fixed RAM address and transfers
+// control, exercising the handoff mechanism independently of the filesystem. A bring-up
+// aid; off by default. See ARCHITECTURE.md for the rationale.
 //
 #define SMOKE_HANDOFF 0
 
@@ -138,20 +137,16 @@ BlArmSmokeHandoff(VOID)
 #define RUN_ARCDOS 0
 
 //
-// RETIRED shortcut. BlArmBootKernel was the M3 vertical slice: PE-load the stand-in
-// kernel directly (real BOOT/LIB peldr.c), build the kernel stack, and transfer with
-// r0 = LOADER_PARAMETER_BLOCK - skipping HAL/import/NLS/hive/driver machinery. The boot
-// menu now boots NT through the GENUINE BlOsLoader (osloader.c), which loads the kernel
-// + HAL, builds the module list, resolves imports, and reaches the same kernel + hello
-// world. BlArmBootKernel is kept behind this gate, off and not compiled, as a dormant
-// reference; set 1 (with BOOT_MENU 0) to use the old direct path. (Loads the same
-// \WINNT\System32\NTOSKRNL.EXE.)
+// BlArmBootKernel: a direct kernel boot for bring-up - PE-load \WINNT\System32\NTOSKRNL.EXE
+// (BOOT/LIB peldr.c), build the kernel stack, and transfer with r0 = LOADER_PARAMETER_BLOCK,
+// without the HAL/import/NLS/hive/driver steps. Off by default; the boot menu boots NT
+// through BlOsLoader (osloader.c). Set 1 (with BOOT_MENU 0) to use the direct boot.
 //
 #define BOOT_KERNEL 0
 
 //
-// Interactive boot menu (like a real ARC firmware boot selection): on startup, let the
-// user pick [1] boot NT (via the genuine BlOsLoader) or [2] the arcdos shell, over the
+// Interactive boot menu (like an ARC firmware boot selection): on startup, let the
+// user pick [1] boot NT (via BlOsLoader) or [2] the arcdos shell, over the
 // console (serial + USB keyboard), with a short countdown to a default. The friendly way
 // to switch WITHOUT recompiling. When BOOT_MENU is 1 (default) the menu runs and the
 // BOOT_KERNEL/RUN_ARCDOS/SMOKE_HANDOFF gates above are bypassed (kept as compile-time
@@ -266,16 +261,15 @@ BlArmRamdiskTest(VOID)
 
 #if BOOT_KERNEL
 //
-// The Arc disk + path of the stand-in kernel image. The partition is opened as a
-// raw block device (data-mode open); BlLoadImage's internal BlOpen then mounts FAT
-// on it and opens the file - the osloadpartition + \System32\ntoskrnl.exe pattern
-// of osloader.c, here pointed at where make-ramdisk.sh packages our kernel. Compiled
-// only for the retired BOOT_KERNEL shortcut; the menu boots NT via BlOsLoader instead.
+// The Arc disk + path of the kernel image. The partition is opened as a raw block
+// device (data-mode open); BlLoadImage's internal BlOpen then mounts FAT on it and
+// opens the file - the osloadpartition + \System32\ntoskrnl.exe pattern of osloader.c,
+// here pointed at where make-ramdisk.sh packages the kernel. Compiled only for the
+// BOOT_KERNEL direct boot; the menu boots NT via BlOsLoader instead.
 //
 #define KERNEL_DEVICE "multi(0)disk(0)rdisk(0)partition(1)"
-// The kernel lives at the genuine NT path \WINNT\System32\NTOSKRNL.EXE - where the
-// real BlOsLoader (menu [3]) looks (<osloadfilename=\WINNT>\System32\<ntoskrnl.exe>).
-// The [1] shortcut loads the same file directly. (Was \OS\NTOSKRNL.EXE.)
+// The kernel lives at the NT path \WINNT\System32\NTOSKRNL.EXE - where BlOsLoader looks
+// (<osloadfilename=\WINNT>\System32\<ntoskrnl.exe>); BOOT_KERNEL loads the same file directly.
 #define KERNEL_FILE   "\\WINNT\\System32\\NTOSKRNL.EXE"
 
 // BlLoaderBlock is built + owned by BlMemoryInitialize (arcfw/ported/blmemory.c).
@@ -321,7 +315,7 @@ BlArmBootKernel(VOID)
     }
 
     //
-    // Load the PE through the real BOOT/LIB loader (peldr.c). LoaderSystemCode marks
+    // Load the PE through the BOOT/LIB loader (peldr.c). LoaderSystemCode marks
     // the image's pages; TARGET_IMAGE (ARM_IMAGE, 0x1c0) is the machine type peldr
     // requires the PE to declare.
     //
@@ -384,9 +378,9 @@ BlArmBootKernel(VOID)
 
 #if BOOT_MENU
 //
-// Interactive boot menu - the runtime switch between booting NT (via the genuine
-// BlOsLoader: loads \WINNT\System32\{ntoskrnl,hal}, hands off -> kernel hello world)
-// and the arcdos shell, modeled on a real ARC firmware boot selection. Input comes
+// Interactive boot menu - the runtime switch between booting NT (via BlOsLoader:
+// loads \WINNT\System32\{ntoskrnl,hal}, hands off to the kernel) and the arcdos shell,
+// modeled on an ARC firmware boot selection. Input comes
 // through the emulated firmware vector (ArcGetReadStatus/ArcRead),
 // so it works on the PL011 serial line AND a USB keyboard on the HDMI console - the same
 // path arcdos itself reads. A short countdown auto-selects the default so a headless or
@@ -467,11 +461,11 @@ BlArmBootMenu(VOID)
     default:
         {
             //
-            // Boot NT through the genuine OS Loader: BlOsLoader loads
+            // Boot NT through the OS Loader: BlOsLoader loads
             // \WINNT\System32\{ntoskrnl.exe,hal.dll}, builds the loaded-module list,
-            // resolves imports, runs BlSetupForNt, and transfers to the kernel (which
-            // prints hello world via the HAL). Returns only on failure. This replaced
-            // the BlArmBootKernel shortcut (still in the tree behind BOOT_KERNEL, off).
+            // resolves imports, loads the SYSTEM hive + NLS data, runs BlSetupForNt, and
+            // transfers to the kernel (which renders the boot-status screen via the HAL).
+            // Returns only on failure.
             //
             ARC_STATUS s;
             s = BlOsLoader(sizeof(BlArmArgv) / sizeof(BlArmArgv[0]), BlArmArgv, NULL);
@@ -534,7 +528,7 @@ BlStartup(
 #endif
 
 #if SMOKE_HANDOFF
-    BlArmSmokeHandoff();   // jump to the stand-in payload; does not return
+    BlArmSmokeHandoff();   // jump to the serial-shell payload; does not return
 #endif
 
 #if BOOT_MENU

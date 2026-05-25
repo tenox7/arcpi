@@ -76,7 +76,7 @@ RtlImageDirectoryEntryToData(
 // Guard stub: BlLoadImage calls this only when an image cannot load at its
 // preferred ImageBase (peldr.c:409, NewImageBase != ImageBase). The ARM port
 // loads every image at its preferred base - BlAllocateDescriptor honors the exact
-// page (blmemory.c) and the stand-in kernel's ImageBase (0x01000000) is free in
+// page (blmemory.c) and the kernel's ImageBase (0x01000000) is free in
 // every build - so this never runs. If it ever does, the kernel base collided
 // with the arcfw/ramdisk and the right fix is to move the base, not to relocate.
 //

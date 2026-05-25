@@ -2,7 +2,7 @@
 # Build an OEM_FONT_FILE_HEADER font blob (font.fon) from the 8x8 bitmaps in
 # font8x8.h, for the kernel-side NT HAL display path (arcfw/kernel/jxdisp.c).
 #
-# The genuine NT HAL (NTHALS/.../JXDISP.C) renders text from a font the OS loader
+# The NT HAL (NTHALS/.../JXDISP.C) renders text from a font the OS loader
 # hands it via LoaderBlock->OemFontFile, in the GDI raster .FNT layout described by
 # INC/HAL.H's OEM_FONT_FILE_HEADER (a "#include pshpack1.h" byte-packed struct):
 #

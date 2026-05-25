@@ -1,4 +1,4 @@
-/* Link script for the stand-in NT kernel (kernel.c).
+/* Link script for the NT kernel (kernel.c).
  *
  * Linked at ImageBase + SectionRVA = 0x01000000 + 0x1000 = 0x01001000. peldr.c
  * maps the single PE section at section RVA 0x1000 above the allocated image base

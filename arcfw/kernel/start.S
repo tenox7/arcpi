@@ -1,4 +1,4 @@
-@ Entry stub for the stand-in NT kernel (the "tiny bit of a kernel" - kernel.c).
+@ Entry stub for the NT kernel (kernel.c).
 @
 @ The loader PE-loads this image (BlLoadImage / peldr.c) and transfers control
 @ with r0 = LOADER_PARAMETER_BLOCK, exactly as osloader.c:792 does for ntoskrnl

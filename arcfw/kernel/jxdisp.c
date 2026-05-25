@@ -1,9 +1,8 @@
 //
 // Kernel-side HAL display - ported from PRIVATE/NTOS/NTHALS/HALFXS/MIPS/JXDISP.C
 // (HalDisplayString / HalpDisplayCharacter / HalpOutputCharacter / a gutted
-// HalpInitializeDisplay0). This is the genuine NT routine the kernel's HAL uses to
-// put text on the boot screen; it is what makes a real-NT-code "hello world" appear
-// on HDMI, instead of the stand-in kernel bit-banging a UART.
+// HalpInitializeDisplay0). These are the NT HAL routines the kernel uses to put text
+// on the boot screen (the HDMI framebuffer), the same code the MIPS/Alpha HAL runs.
 //
 // Two architecture deltas vs. the verbatim MIPS source, both forced and both local:
 //
